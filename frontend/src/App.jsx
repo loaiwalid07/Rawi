@@ -12,6 +12,7 @@ function App() {
   const [ocrCompleted, setOcrCompleted] = useState(false)
   const [language, setLanguage] = useState('en')
   const [processingStep, setProcessingStep] = useState('')
+  const [uploadedFile, setUploadedFile] = useState(null)
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
 
@@ -66,7 +67,7 @@ function App() {
 
   const fetchVoices = async () => {
     try {
-      const response = await fetch('http://localhost:8000/voices')
+      const response = await fetch('/voices')
       const data = await response.json()
       if (data.success && data.voices.length > 0) {
         setVoices(data.voices)
@@ -101,6 +102,7 @@ function App() {
     const ctx = canvas.getContext('2d')
     ctx.drawImage(video, 0, 0)
     setCapturedImage(canvas.toDataURL('image/jpeg'))
+    setUploadedFile(null)
     const stream = video.srcObject
     if (stream) {
       stream.getTracks().forEach(track => track.stop())
@@ -110,6 +112,7 @@ function App() {
   const handleImageUpload = (e) => {
     const file = e.target.files[0]
     if (file) {
+      setUploadedFile(file)
       const reader = new FileReader()
       reader.onload = (event) => setCapturedImage(event.target.result)
       reader.readAsDataURL(file)
@@ -121,18 +124,33 @@ function App() {
 
     setLoading(true)
     setProcessingStep(t.processingOcr)
+    setOcrCompleted(false)
 
     try {
-      const ocrResponse = await fetch('http://localhost:8000/ocr', {
+      let formData
+      if (uploadedFile) {
+        formData = new FormData()
+        formData.append('file', uploadedFile, uploadedFile.name)
+      } else {
+        formData = createFormDataFromImage(capturedImage)
+      }
+      const ocrResponse = await fetch('/ocr', {
         method: 'POST',
-        body: createFormDataFromImage(capturedImage)
+        body: formData
       })
+
+      if (!ocrResponse.ok) {
+        const text = await ocrResponse.text()
+        throw new Error(`OCR failed (${ocrResponse.status}): ${text}`)
+      }
 
       const ocrData = await ocrResponse.json()
 
       if (ocrData.success) {
         setExtractedText(ocrData.text.trim())
         setOcrCompleted(true)
+      } else {
+        throw new Error(ocrData.error || 'OCR failed')
       }
     } catch (error) {
       console.error('Error processing image:', error)
@@ -154,7 +172,7 @@ function App() {
       formData.append('text', extractedText)
       formData.append('voice_id', selectedVoiceId)
 
-      const ttsResponse = await fetch('http://localhost:8000/tts', {
+      const ttsResponse = await fetch('/tts', {
         method: 'POST',
         body: formData
       })

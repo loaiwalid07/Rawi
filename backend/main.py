@@ -1,15 +1,33 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-import pytesseract
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 from PIL import Image
+import numpy as np
 import pyttsx3
 import io
 import os
 import uuid
 from typing import Optional
+import easyocr
+import ssl
+
+try:
+    _create_unverified_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
+else:
+    ssl._create_default_https_context = _create_unverified_https_context
 
 app = FastAPI(title="OCR TTS API")
+
+BASE_DIR = Path(__file__).resolve().parent
+FRONTEND_DIST = BASE_DIR.parent / "frontend" / "dist"
+ASSETS_DIR = FRONTEND_DIST / "assets"
+
+if ASSETS_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,14 +43,23 @@ AUDIO_DIR = "audio"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
+_OCR_READER = None
+
+def get_ocr_reader():
+    global _OCR_READER
+    if _OCR_READER is None:
+        # Default to CPU for broader compatibility.
+        _OCR_READER = easyocr.Reader(['ar'], gpu=True)
+    return _OCR_READER
+
 @app.post("/ocr")
 async def extract_text(file: UploadFile = File(...)):
-    try:
-        image_bytes = await file.read()
-        image = Image.open(io.BytesIO(image_bytes))
-        
-        text = pytesseract.image_to_string(image)
-        
+    try:            
+        image = Image.open(file.file).convert("RGB")
+        image_array = np.array(image)
+        reader = get_ocr_reader()
+        result = reader.readtext(image_array, detail=0)
+        text = ' '.join(result)
         return {
             "success": True,
             "text": text,
@@ -63,7 +90,7 @@ async def text_to_speech(text: str = Form(...), voice_id: Optional[int] = Form(0
         
         return {
             "success": True,
-            "audio_url": f"http://localhost:8000/audio/{filename}",
+            "audio_url": f"/audio/{filename}",
             "filename": filename
         }
     except Exception as e:
@@ -97,7 +124,21 @@ async def get_audio(filename: str):
 
 @app.get("/")
 async def root():
+    index_file = FRONTEND_DIST / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
     return {"message": "OCR TTS API is running"}
+
+@app.get("/{full_path:path}")
+async def spa_fallback(full_path: str):
+    if FRONTEND_DIST.exists():
+        file_path = FRONTEND_DIST / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        index_file = FRONTEND_DIST / "index.html"
+        if index_file.exists():
+            return FileResponse(index_file)
+    return {"detail": "Not Found"}
 
 if __name__ == "__main__":
     import uvicorn
