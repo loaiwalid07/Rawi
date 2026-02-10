@@ -1,0 +1,69 @@
+.waveform-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 120px;
+  padding: 20px;
+  background: linear-gradient(to bottom, rgba(139, 92, 246, 0.1), rgba(139, 92, 246, 0.05));
+  border-radius: 16px;
+  border: 1px solid rgba(139, 92, 246, 0.3);
+}
+
+.wave-bar {
+  width: 4px;
+  border-radius: 2px;
+  transition: height 0.1s ease, background-color 0.3s ease;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.wave-bar:nth-child(odd) {
+  animation-delay: 0.3s;
+}
+
+.wave-bar:nth-child(even) {
+  animation-delay: 0.6s;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(1.1);
+  }
+}
+
+.progress-bar {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.progress-bar:hover {
+  height: 8px;
+  transition: height 0.2s ease;
+}
+
+.progress-fill {
+  position: relative;
+}
+
+.progress-fill::after {
+  content: '';
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.progress-bar:hover .progress-fill::after {
+  opacity: 1;
+}
