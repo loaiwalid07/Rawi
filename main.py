@@ -142,7 +142,7 @@ class RawiAgent:
         # Agent metadata
         self.name = "rawi_storyteller"
         self.description = "Transforms educational topics into immersive multimodal stories"
-        self.model = "gemini-1.5-flash-002"
+        self.model = "gemini-2.5-flash"
         
         logger.info("Initialized RawiAgent", project_id=self._project_id)
     
