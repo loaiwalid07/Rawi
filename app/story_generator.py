@@ -5,6 +5,16 @@ Story Generator - Uses Gemini 3 Flash to create engaging story narratives
 import os
 import json
 from typing import Dict, Any, List, Optional
+from dotenv import load_dotenv
+load_dotenv()
+
+# Try Google AI SDK (genai) first - uses API key
+try:
+    import google.genai as genai
+    GENAI_AVAILABLE = True
+except ImportError:
+    GENAI_AVAILABLE = False
+    genai = None
 
 # Mock Vertex AI imports for development
 try:
@@ -29,10 +39,23 @@ class StoryGenerator:
         self.project_id = project_id
         self.location = location
         self.model = None
+        self.genai_client = None
         
+        # Try Google AI API key first
+        api_key = os.getenv("GEMINI_API_KEY")
+        if api_key and GENAI_AVAILABLE:
+            try:
+                genai.configure(api_key=api_key)
+                self.genai_client = genai
+                self.model_name = "gemini-2.0-flash"
+                logger.info("Initialized StoryGenerator with Google AI API", model=self.model_name)
+                return
+            except Exception as e:
+                logger.warning(f"Failed to initialize Google AI: {e}")
+        
+        # Fall back to Vertex AI
         if VERTEXAI_AVAILABLE and GenerativeModel:
             try:
-                # Initialize Vertex AI
                 vertexai.init(project=project_id, location=location)
                 self.model = GenerativeModel("gemini-2.5-flash")
                 logger.info("Initialized StoryGenerator with Vertex AI", project=project_id, location=location)
@@ -40,7 +63,7 @@ class StoryGenerator:
                 logger.warning(f"Failed to initialize Vertex AI: {e}, using mock mode")
                 self.model = None
         else:
-            logger.warning("Vertex AI not available, using mock responses")
+            logger.warning("No AI backend available, using mock responses")
     
     async def generate_story_plan(
         self,
@@ -61,16 +84,22 @@ class StoryGenerator:
         Returns:
             Story plan with narration, visual elements, and structure
         """
-        # If model is not available, return mock data for development
-        if not self.model:
-            logger.warning("No Vertex AI model available, using mock story plan")
+        # If no AI backend available, return mock data
+        if not self.model and not self.genai_client:
+            logger.warning("No AI backend available, using mock story plan")
             return self._get_mock_story_plan(topic, audience, metaphor, num_segments)
         
         try:
             prompt = self._create_story_plan_prompt(topic, audience, metaphor, num_segments)
             
-            response = await self.model.generate_content_async(prompt)
-            story_plan = self._parse_story_plan(response.text, num_segments)
+            # Use Google AI API if available
+            if self.genai_client:
+                response = self.genai_client.GenerativeModel(self.model_name).generate_content(prompt)
+                story_plan = self._parse_story_plan(response.text, num_segments)
+            else:
+                # Use Vertex AI
+                response = await self.model.generate_content_async(prompt)
+                story_plan = self._parse_story_plan(response.text, num_segments)
             
             logger.info(
                 "Generated story plan",
@@ -82,7 +111,7 @@ class StoryGenerator:
             return story_plan
             
         except Exception as e:
-            logger.error(f"Vertex AI failed: {e}, using mock story plan")
+            logger.error(f"AI generation failed: {e}, using mock story plan")
             return self._get_mock_story_plan(topic, audience, metaphor, num_segments)
     
     def _get_mock_story_plan(

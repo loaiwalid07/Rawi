@@ -2,7 +2,18 @@
 Storyboard Agent - Generates detailed storyboard descriptions for Veo video generation
 """
 
+import os
 from typing import Dict, Any, List, Optional
+from dotenv import load_dotenv
+load_dotenv()
+
+# Try Google AI SDK (genai) first - uses API key
+try:
+    import google.genai as genai
+    GENAI_AVAILABLE = True
+except ImportError:
+    GENAI_AVAILABLE = False
+    genai = None
 
 # Mock ADK imports for development
 try:
@@ -43,7 +54,22 @@ class StoryboardAgent:
         self._project_id = project_id
         self._location = location
         self.model = None
+        self.genai_client = None
+        self.model_name = None
         
+        # Try Google AI API key first
+        api_key = os.getenv("GEMINI_API_KEY")
+        if api_key and GENAI_AVAILABLE:
+            try:
+                genai.configure(api_key=api_key)
+                self.genai_client = genai
+                self.model_name = "gemini-2.0-flash"
+                logger.info("Initialized StoryboardAgent with Google AI API", model=self.model_name)
+                return
+            except Exception as e:
+                logger.warning(f"Failed to initialize Google AI: {e}")
+        
+        # Fall back to Vertex AI
         if VERTEXAI_AVAILABLE and GenerativeModel:
             try:
                 vertexai.init(project=project_id, location=location)
@@ -53,7 +79,7 @@ class StoryboardAgent:
                 logger.warning(f"Failed to initialize Vertex AI: {e}, using mock mode")
                 self.model = None
         else:
-            logger.warning("Vertex AI not available, using mock mode")
+            logger.warning("No AI backend available, using mock mode")
         
         # Agent metadata
         self.name = "storyboard_agent"
