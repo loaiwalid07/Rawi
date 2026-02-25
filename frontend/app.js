@@ -13,11 +13,8 @@ class RawiApp {
     }
 
     getApiUrl() {
-        // Try to use deployed URL, fallback to localhost
-        if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-            return window.location.origin;
-        }
-        return 'http://localhost:8000';
+        // Use the same origin as the frontend (works for both local and deployed)
+        return window.location.origin;
     }
 
     initializeEventListeners() {
