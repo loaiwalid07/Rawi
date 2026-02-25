@@ -66,7 +66,7 @@ class DirectorAgent:
         # Agent metadata
         self.name = "director_agent"
         self.description = "Orchestrates the storytelling pipeline"
-        self.model = "gemini-3-flash"
+        self.model = "gemini-1.5-flash-002"
         
         logger.info("Initialized DirectorAgent", project=project_id)
     

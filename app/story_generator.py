@@ -34,7 +34,7 @@ class StoryGenerator:
             try:
                 # Initialize Vertex AI
                 vertexai.init(project=project_id, location=location)
-                self.model = GenerativeModel("gemini-3-flash")
+                self.model = GenerativeModel("gemini-1.5-flash-002")
                 logger.info("Initialized StoryGenerator with Vertex AI", project=project_id, location=location)
             except Exception as e:
                 logger.warning(f"Failed to initialize Vertex AI: {e}, using mock mode")

@@ -47,7 +47,7 @@ class StoryboardAgent:
         if VERTEXAI_AVAILABLE and GenerativeModel:
             try:
                 vertexai.init(project=project_id, location=location)
-                self.model = GenerativeModel("gemini-3-flash")
+                self.model = GenerativeModel("gemini-1.5-flash-002")
                 logger.info("Initialized StoryboardAgent with Vertex AI", project=project_id)
             except Exception as e:
                 logger.warning(f"Failed to initialize Vertex AI: {e}, using mock mode")
