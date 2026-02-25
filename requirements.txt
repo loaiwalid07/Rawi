@@ -1,0 +1,49 @@
+# Google Cloud
+google-cloud-aiplatform>=1.38.0
+google-cloud-storage>=2.10.0
+google-cloud-texttospeech>=2.16.0
+
+# Google ADK
+google-adk>=0.1.0
+
+# Web Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+websockets>=12.0
+
+# Data Handling
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Async Support
+aiohttp>=3.9.0
+asyncio>=3.4.3
+
+# Video Processing
+ffmpeg-python>=0.2.0
+pillow>=10.1.0
+
+# Utilities
+python-dotenv>=1.0.0
+requests>=2.31.0
+tenacity>=8.2.0
+
+# Development
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+black>=23.11.0
+flake8>=6.1.0
+mypy>=1.7.0
+
+# Type Stubs
+types-requests>=2.31.0
+types-python-dateutil>=2.8.0
+
+# Logging
+structlog>=23.2.0
+
+# Rate Limiting
+slowapi>=0.1.9
+
+# Monitoring
+prometheus-client>=0.19.0

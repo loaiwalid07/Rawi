@@ -1,13 +1,217 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAWI - The Storyteller</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <h1>📖 RAWI</h1>
+                <p class="tagline">The Storyteller</p>
+            </div>
+            <nav class="nav">
+                <a href="#" class="nav-link active">Create Story</a>
+                <a href="#" class="nav-link">My Stories</a>
+                <a href="#" class="nav-link">About</a>
+            </nav>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Story Creation Form -->
+            <section class="story-form">
+                <h2>Create a New Story</h2>
+                <form id="storyForm">
+                    <div class="form-group">
+                        <label for="topic">Topic</label>
+                        <input 
+                            type="text" 
+                            id="topic" 
+                            name="topic" 
+                            placeholder="e.g., French Revolution, Solar System, Water Cycle"
+                            required
+                        >
+                    </div>
+
+                    <div class="form-group">
+                        <label for="audience">Target Audience</label>
+                        <select id="audience" name="audience">
+                            <option value="5-year-old">5-year-old</option>
+                            <option value="8-year-old">8-year-old</option>
+                            <option value="10-year-old" selected>10-year-old</option>
+                            <option value="12-year-old">12-year-old</option>
+                            <option value="15-year-old">15-year-old</option>
+                            <option value="general">General</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="metaphor">Metaphor (Optional)</label>
+                        <input 
+                            type="text" 
+                            id="metaphor" 
+                            name="metaphor" 
+                            placeholder="e.g., a bakery, a playground, a magical journey"
+                        >
+                        <small class="help-text">Use a metaphor to make complex topics easier to understand</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="duration">Duration (minutes)</label>
+                        <input 
+                            type="number" 
+                            id="duration" 
+                            name="duration" 
+                            min="1" 
+                            max="10" 
+                            value="5"
+                        >
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" id="generateBtn">
+                        <span class="btn-text">Generate Story</span>
+                        <span class="btn-loading" style="display: none;">
+                            <span class="spinner"></span>
+                            Generating...
+                        </span>
+                    </button>
+                </form>
+            </section>
+
+            <!-- Story Player -->
+            <section class="story-player" id="storyPlayer" style="display: none;">
+                <div class="player-header">
+                    <h2 id="storyTitle">Story Title</h2>
+                    <button class="btn btn-secondary" id="closeBtn">✕ Close</button>
+                </div>
+
+                <div class="player-content">
+                    <!-- Video Player -->
+                    <div class="video-container">
+                        <video id="storyVideo" controls>
+                            Your browser does not support the video tag.
+                        </video>
+                    </div>
+
+                    <!-- Text Bubbles -->
+                    <div class="text-bubbles" id="textBubbles">
+                        <!-- Dynamic text bubbles will be inserted here -->
+                    </div>
+
+                    <!-- Progress Bar -->
+                    <div class="progress-container">
+                        <div class="progress-bar" id="progressBar"></div>
+                        <div class="progress-time">
+                            <span id="currentTime">0:00</span>
+                            <span id="totalTime">0:00</span>
+                        </div>
+                    </div>
+
+                    <!-- Controls -->
+                    <div class="player-controls">
+                        <button class="control-btn" id="playPauseBtn">
+                            ▶️ Play
+                        </button>
+                        <button class="control-btn" id="rewindBtn">
+                            ⏪ -10s
+                        </button>
+                        <button class="control-btn" id="forwardBtn">
+                            +10s ⏩
+                        </button>
+                        <button class="control-btn" id="muteBtn">
+                            🔊
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Story Details -->
+                <div class="story-details">
+                    <h3>Story Details</h3>
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <strong>Topic:</strong>
+                            <span id="detailTopic">-</span>
+                        </div>
+                        <div class="detail-item">
+                            <strong>Audience:</strong>
+                            <span id="detailAudience">-</span>
+                        </div>
+                        <div class="detail-item">
+                            <strong>Duration:</strong>
+                            <span id="detailDuration">-</span>
+                        </div>
+                    </div>
+
+                    <div class="story-summary">
+                        <strong>Narration:</strong>
+                        <p id="storyNarration">-</p>
+                    </div>
+
+                    <div class="story-resources">
+                        <h4>Resources</h4>
+                        <div class="resource-links">
+                            <a href="#" class="resource-link" id="downloadVideo" target="_blank">
+                                📹 Download Video
+                            </a>
+                            <a href="#" class="resource-link" id="downloadAudio" target="_blank">
+                                🎵 Download Audio
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Loading State -->
+            <div class="loading-overlay" id="loadingOverlay" style="display: none;">
+                <div class="loading-content">
+                    <div class="spinner-large"></div>
+                    <h3>Creating Your Story</h3>
+                    <p id="loadingMessage">Generating narrative...</p>
+                    <div class="loading-steps">
+                        <div class="step" id="step1">
+                            <span class="step-icon">✓</span>
+                            <span class="step-text">Planning story</span>
+                        </div>
+                        <div class="step" id="step2">
+                            <span class="step-icon">✓</span>
+                            <span class="step-text">Creating storyboard</span>
+                        </div>
+                        <div class="step" id="step3">
+                            <span class="step-icon">✓</span>
+                            <span class="step-text">Generating visuals</span>
+                        </div>
+                        <div class="step" id="step4">
+                            <span class="step-icon">✓</span>
+                            <span class="step-text">Creating voiceover</span>
+                        </div>
+                        <div class="step" id="step5">
+                            <span class="step-icon">✓</span>
+                            <span class="step-text">Merging video</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Error State -->
+            <div class="error-message" id="errorMessage" style="display: none;">
+                <h3>❌ Oops!</h3>
+                <p id="errorText">Something went wrong. Please try again.</p>
+                <button class="btn btn-primary" id="retryBtn">Try Again</button>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Built with Google ADK, Gemini 3 Flash, Imagen, and Veo</p>
+            <p>© 2025 RAWI - The Storyteller</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
 </html>

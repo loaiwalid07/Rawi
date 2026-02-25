@@ -1,0 +1,278 @@
+"""
+Media Engine - Integrates Imagen, Veo, and Gemini TTS for media generation
+"""
+
+import os
+import uuid
+from typing import Dict, Any, Optional
+from google.cloud import storage
+from google.cloud import texttospeech
+from google.cloud import aiplatform
+import structlog
+
+logger = structlog.get_logger(__name__)
+
+
+class ImageGenerator:
+    """Generates images using Imagen"""
+    
+    def __init__(self, project_id: str, location: str = "us-central1"):
+        self.project_id = project_id
+        self.location = location
+        self.storage_client = storage.Client(project=project_id)
+        self.bucket_name = f"{project_id}-story-assets"
+        
+        logger.info("Initialized ImageGenerator", project=project_id)
+    
+    async def generate(
+        self,
+        prompt: str,
+        style: str = "illustration",
+        aspect_ratio: str = "16:9"
+    ) -> str:
+        """
+        Generate an image using Imagen.
+        
+        Args:
+            prompt: Text description of the image
+            style: Image style (illustration, photo, etc.)
+            aspect_ratio: Aspect ratio of the image
+            
+        Returns:
+            GCS URL of the generated image
+        """
+        from vertexai.preview.vision_models import ImageGenerationModel
+        
+        model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-001")
+        
+        full_prompt = f"{prompt}. Style: {style}, educational, child-friendly."
+        
+        logger.info("Generating image", prompt_length=len(full_prompt))
+        
+        images = model.generate_images(
+            prompt=full_prompt,
+            number_of_images=1,
+            aspect_ratio=aspect_ratio
+        )
+        
+        if not images:
+            raise ValueError("No images generated")
+        
+        # Save to GCS
+        filename = f"storyboards/{uuid.uuid4()}.png"
+        gcs_url = await self._upload_to_gcs(images[0]._image_bytes, filename)
+        
+        logger.info("Image generated and uploaded", gcs_url=gcs_url)
+        return gcs_url
+    
+    async def _upload_to_gcs(self, image_bytes: bytes, filename: str) -> str:
+        """Upload image bytes to Google Cloud Storage"""
+        bucket = self.storage_client.bucket(self.bucket_name)
+        blob = bucket.blob(filename)
+        
+        blob.upload_from_string(image_bytes, content_type="image/png")
+        blob.make_public()
+        
+        return blob.public_url
+
+
+class VoiceGenerator:
+    """Generates voiceover using Gemini 2.5 Flash-TTS"""
+    
+    def __init__(self, project_id: str, location: str = "us-central1"):
+        self.project_id = project_id
+        self.location = location
+        self.client = texttospeech.TextToSpeechClient()
+        self.storage_client = storage.Client(project=project_id)
+        self.bucket_name = f"{project_id}-story-assets"
+        
+        logger.info("Initialized VoiceGenerator", project=project_id)
+    
+    async def generate(
+        self,
+        text: str,
+        voice: str = "male-1",
+        emotion: str = "warm",
+        language: str = "en"
+    ) -> str:
+        """
+        Generate voiceover audio using Gemini TTS.
+        
+        Args:
+            text: Text to convert to speech
+            voice: Voice type
+            emotion: Emotional tone
+            language: Language code
+            
+        Returns:
+            GCS URL of the generated audio
+        """
+        synthesis_input = texttospeech.SynthesisInput(text=text)
+        
+        # Configure voice based on emotion
+        voice_params = texttospeech.VoiceSelectionParams(
+            language_code=f"{language}-US",
+            name=f"{language}-US-{voice}"
+        )
+        
+        # Adjust audio config based on emotion
+        speaking_rate = self._get_speaking_rate(emotion)
+        pitch = self._get_pitch(emotion)
+        
+        audio_config = texttospeech.AudioConfig(
+            audio_encoding=texttospeech.AudioEncoding.MP3,
+            speaking_rate=speaking_rate,
+            pitch=pitch
+        )
+        
+        logger.info("Generating voiceover", text_length=len(text), emotion=emotion)
+        
+        response = self.client.synthesize_speech(
+            input=synthesis_input,
+            voice=voice_params,
+            audio_config=audio_config
+        )
+        
+        # Save to GCS
+        filename = f"voiceovers/{uuid.uuid4()}.mp3"
+        gcs_url = await self._upload_to_gcs(response.audio_content, filename)
+        
+        logger.info("Voiceover generated and uploaded", gcs_url=gcs_url)
+        return gcs_url
+    
+    def _get_speaking_rate(self, emotion: str) -> float:
+        """Get speaking rate based on emotion"""
+        rates = {
+            "excited": 1.1,
+            "calm": 0.9,
+            "warm": 1.0,
+            "concerned": 0.95,
+            "mysterious": 0.85
+        }
+        return rates.get(emotion.lower(), 1.0)
+    
+    def _get_pitch(self, emotion: str) -> float:
+        """Get pitch based on emotion"""
+        pitches = {
+            "excited": 1.2,
+            "calm": 0.9,
+            "warm": 1.0,
+            "concerned": 0.8,
+            "mysterious": 0.85
+        }
+        return pitches.get(emotion.lower(), 1.0)
+    
+    async def _upload_to_gcs(self, audio_content: bytes, filename: str) -> str:
+        """Upload audio content to Google Cloud Storage"""
+        bucket = self.storage_client.bucket(self.bucket_name)
+        blob = bucket.blob(filename)
+        
+        blob.upload_from_string(audio_content, content_type="audio/mpeg")
+        blob.make_public()
+        
+        return blob.public_url
+
+
+class VideoGenerator:
+    """Generates video segments using Veo"""
+    
+    def __init__(self, project_id: str, location: str = "us-central1"):
+        self.project_id = project_id
+        self.location = location
+        self.storage_client = storage.Client(project=project_id)
+        self.bucket_name = f"{project_id}-story-assets"
+        
+        logger.info("Initialized VideoGenerator", project=project_id)
+    
+    async def generate(
+        self,
+        prompt: str,
+        duration: int = 15,
+        resolution: str = "1080p"
+    ) -> str:
+        """
+        Generate a video segment using Veo.
+        
+        Args:
+            prompt: Text description of the video
+            duration: Duration in seconds
+            resolution: Video resolution
+            
+        Returns:
+            GCS URL of the generated video
+        """
+        from vertexai.preview.vision_models import VideoGenerationModel
+        
+        model = VideoGenerationModel.from_pretrained("veo-2.0-generate-001")
+        
+        logger.info("Generating video", prompt_length=len(prompt), duration=duration)
+        
+        videos = model.generate_videos(
+            prompt=prompt,
+            duration=duration
+        )
+        
+        if not videos:
+            raise ValueError("No videos generated")
+        
+        # Save to GCS
+        filename = f"videos/{uuid.uuid4()}.mp4"
+        gcs_url = await self._upload_to_gcs(videos[0]._video_bytes, filename)
+        
+        logger.info("Video generated and uploaded", gcs_url=gcs_url)
+        return gcs_url
+    
+    async def _upload_to_gcs(self, video_bytes: bytes, filename: str) -> str:
+        """Upload video bytes to Google Cloud Storage"""
+        bucket = self.storage_client.bucket(self.bucket_name)
+        blob = bucket.blob(filename)
+        
+        blob.upload_from_string(video_bytes, content_type="video/mp4")
+        blob.make_public()
+        
+        return blob.public_url
+
+
+class MediaEngine:
+    """Unified interface for all media generation"""
+    
+    def __init__(self, project_id: str, location: str = "us-central1"):
+        self.image_gen = ImageGenerator(project_id, location)
+        self.voice_gen = VoiceGenerator(project_id, location)
+        self.video_gen = VideoGenerator(project_id, location)
+        
+        logger.info("Initialized MediaEngine", project=project_id)
+    
+    async def generate_story_media(
+        self,
+        image_prompt: str,
+        voiceover_text: str,
+        video_prompt: str,
+        emotion: str = "warm"
+    ) -> Dict[str, str]:
+        """
+        Generate all media for a story segment.
+        
+        Args:
+            image_prompt: Prompt for storyboard image
+            voiceover_text: Text for voiceover
+            video_prompt: Prompt for video generation
+            emotion: Emotional tone
+            
+        Returns:
+            Dictionary with URLs for all generated media
+        """
+        # Generate all media in parallel
+        import asyncio
+        
+        image_url, voiceover_url, video_url = await asyncio.gather(
+            self.image_gen.generate(image_prompt),
+            self.voice_gen.generate(voiceover_text, emotion=emotion),
+            self.video_gen.generate(video_prompt)
+        )
+        
+        return {
+            "image_url": image_url,
+            "voiceover_url": voiceover_url,
+            "video_url": video_url
+        }
