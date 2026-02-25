@@ -14,17 +14,23 @@ except ImportError:
     ADK_AVAILABLE = False
     
     class Agent:
-        def __init__(self, name, description, tools=None, model=None):
+        def __init__(self, name: str = "", description: str = "", tools: list = None, model: str = ""):
             self.name = name
             self.description = description
             self.tools = tools or []
             self.model = model
     
     class Tool:
-        def __init__(self, name, description, func):
+        """Mock tool class for development"""
+        def __init__(self, name: str = "", description: str = "", func=None):
             self.name = name
             self.description = description
             self.func = func
+        
+        def __call__(self, *args, **kwargs):
+            if self.func:
+                return self.func(*args, **kwargs)
+            return None
 
 from app.story_generator import StoryGenerator
 from app.models.story_frame import StoryFrame
