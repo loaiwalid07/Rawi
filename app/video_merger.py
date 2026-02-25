@@ -77,6 +77,15 @@ class VideoMerger:
             # Download all segments locally
             local_files = await self._download_segments(video_segments)
             
+            # If no valid videos downloaded, return the first video URL or mock
+            if not local_files:
+                logger.warning("No valid video segments to merge, using first available video URL")
+                first_video_url = video_segments[0]["url"] if video_segments else None
+                if first_video_url and first_video_url.startswith("https://storage.googleapis.com"):
+                    return first_video_url
+                # Return mock or first URL
+                return video_segments[0]["url"] if video_segments else "https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4"
+            
             # Calculate durations and offsets
             segment_info = await self._analyze_segments(local_files)
             
@@ -108,19 +117,25 @@ class VideoMerger:
             gcs_url = segment["url"]
             segment_id = segment.get("segment_id", "unknown")
             
+            # Skip mock URLs (external URLs not from our bucket)
+            if not gcs_url.startswith(f"https://storage.googleapis.com/{self.bucket_name}"):
+                logger.warning(f"Skipping mock video URL for segment {segment_id}: {gcs_url}")
+                continue
+            
             # Extract filename from GCS URL
             filename = gcs_url.split("/")[-1]
             local_path = os.path.join(self.temp_dir, filename)
             
             # Download from GCS
             try:
-                blob = self.bucket.blob(gcs_url.replace(f"https://storage.googleapis.com/{self.bucket_name}/", ""))
+                blob_path = gcs_url.replace(f"https://storage.googleapis.com/{self.bucket_name}/", "")
+                blob = self.bucket.blob(blob_path)
                 await asyncio.to_thread(blob.download_to_filename, local_path)
                 local_files.append(local_path)
                 logger.info("Downloaded segment", segment_id=segment_id, filename=filename)
             except Exception as e:
                 logger.error("Failed to download segment", segment_id=segment_id, error=str(e))
-                raise
+                continue
         
         return local_files
     

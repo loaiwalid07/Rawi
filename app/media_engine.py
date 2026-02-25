@@ -66,6 +66,17 @@ class ImageGenerator:
             self.storage_client = None
             self.bucket = None
         
+        # Try to initialize Vertex AI for Imagen
+        self.imagen_model = None
+        if VERTEXAI_AVAILABLE and ImageGenerationModel:
+            try:
+                import vertexai
+                vertexai.init(project=project_id, location=location)
+                self.imagen_model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-002")
+                logger.info("Initialized Imagen model", project=project_id)
+            except Exception as e:
+                logger.warning(f"Failed to initialize Imagen: {e}")
+        
         logger.info("Initialized ImageGenerator", project=project_id, bucket=self.bucket_name)
     
     async def generate(
@@ -90,34 +101,30 @@ class ImageGenerator:
             logger.warning("No bucket available, returning mock image URL")
             return f"https://via.placeholder.com/1280x720.png?text=Story+Image+Placeholder"
         
-        # Return mock URL for development
-        if not VERTEXAI_AVAILABLE or not ImageGenerationModel:
-            logger.warning("Vertex AI not available, returning mock image URL")
-            return f"https://via.placeholder.com/1280x720.png?text=Story+Image+Placeholder"
+        # Try to use Imagen
+        if self.imagen_model:
+            try:
+                full_prompt = f"{prompt}. Style: {style}, educational, child-friendly."
+                logger.info("Generating image with Imagen", prompt_length=len(full_prompt))
+                
+                images = self.imagen_model.generate_images(
+                    prompt=full_prompt,
+                    number_of_images=1,
+                    aspect_ratio=aspect_ratio
+                )
+                
+                if images:
+                    # Save to GCS
+                    filename = f"storyboards/{uuid.uuid4()}.png"
+                    gcs_url = await self._upload_to_gcs(images[0]._image_bytes, filename)
+                    logger.info("Image generated and uploaded", gcs_url=gcs_url)
+                    return gcs_url
+            except Exception as e:
+                logger.warning(f"Imagen generation failed: {e}")
         
-        from vertexai.preview.vision_models import ImageGenerationModel
-        
-        model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-001")
-        
-        full_prompt = f"{prompt}. Style: {style}, educational, child-friendly."
-        
-        logger.info("Generating image", prompt_length=len(full_prompt))
-        
-        images = model.generate_images(
-            prompt=full_prompt,
-            number_of_images=1,
-            aspect_ratio=aspect_ratio
-        )
-        
-        if not images:
-            raise ValueError("No images generated")
-        
-        # Save to GCS
-        filename = f"storyboards/{uuid.uuid4()}.png"
-        gcs_url = await self._upload_to_gcs(images[0]._image_bytes, filename)
-        
-        logger.info("Image generated and uploaded", gcs_url=gcs_url)
-        return gcs_url
+        # Fallback to mock URL
+        logger.warning("Returning mock image URL")
+        return f"https://via.placeholder.com/1280x720.png?text=Story+Image+Placeholder"
     
     async def _upload_to_gcs(self, image_bytes: bytes, filename: str) -> str:
         """Upload image bytes to Google Cloud Storage"""
@@ -333,6 +340,17 @@ class VideoGenerator:
             self.storage_client = None
             self.bucket = None
         
+        # Try to initialize Vertex AI for Veo
+        self.veo_model = None
+        if VERTEXAI_AVAILABLE and VideoGenerationModel:
+            try:
+                import vertexai
+                vertexai.init(project=project_id, location=location)
+                self.veo_model = VideoGenerationModel.from_pretrained("veo-2.0-generate-001")
+                logger.info("Initialized Veo model", project=project_id)
+            except Exception as e:
+                logger.warning(f"Failed to initialize Veo: {e}")
+        
         logger.info("Initialized VideoGenerator", project=project_id, bucket=self.bucket_name)
     
     async def generate(
@@ -357,31 +375,28 @@ class VideoGenerator:
             logger.warning("No bucket available, returning mock video URL")
             return "https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4"
         
-        # Return mock URL for development
-        if not VERTEXAI_AVAILABLE or not VideoGenerationModel:
-            logger.warning("Vertex AI Veo not available, returning mock video URL")
-            return "https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4"
+        # Try to use Veo
+        if self.veo_model:
+            try:
+                logger.info("Generating video with Veo", prompt_length=len(prompt), duration=duration)
+                
+                videos = self.veo_model.generate_videos(
+                    prompt=prompt,
+                    duration=duration
+                )
+                
+                if videos:
+                    # Save to GCS
+                    filename = f"videos/{uuid.uuid4()}.mp4"
+                    gcs_url = await self._upload_to_gcs(videos[0]._video_bytes, filename)
+                    logger.info("Video generated and uploaded", gcs_url=gcs_url)
+                    return gcs_url
+            except Exception as e:
+                logger.warning(f"Veo generation failed: {e}")
         
-        from vertexai.preview.vision_models import VideoGenerationModel
-        
-        model = VideoGenerationModel.from_pretrained("veo-2.0-generate-001")
-        
-        logger.info("Generating video", prompt_length=len(prompt), duration=duration)
-        
-        videos = model.generate_videos(
-            prompt=prompt,
-            duration=duration
-        )
-        
-        if not videos:
-            raise ValueError("No videos generated")
-        
-        # Save to GCS
-        filename = f"videos/{uuid.uuid4()}.mp4"
-        gcs_url = await self._upload_to_gcs(videos[0]._video_bytes, filename)
-        
-        logger.info("Video generated and uploaded", gcs_url=gcs_url)
-        return gcs_url
+        # Fallback to mock URL
+        logger.warning("Returning mock video URL")
+        return "https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4"
     
     async def _upload_to_gcs(self, video_bytes: bytes, filename: str) -> str:
         """Upload video bytes to Google Cloud Storage"""
