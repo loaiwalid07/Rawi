@@ -14,6 +14,21 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 
+def ensure_bucket_exists(storage_client, bucket_name: str, location: str = "us-central1"):
+    """Create bucket if it doesn't exist"""
+    try:
+        bucket = storage_client.bucket(bucket_name)
+        if bucket.exists():
+            return bucket
+        bucket.location = location
+        bucket.create()
+        logger.info(f"Created bucket: {bucket_name}")
+        return bucket
+    except Exception as e:
+        logger.warning(f"Could not create bucket {bucket_name}: {e}")
+        return None
+
+
 class VideoMerger:
     """Merges multiple video segments with smooth transitions using FFmpeg"""
     
@@ -22,7 +37,7 @@ class VideoMerger:
         self.location = location
         self.storage_client = storage.Client(project=project_id)
         self.bucket_name = f"{project_id}-story-assets"
-        self.bucket = self.storage_client.bucket(self.bucket_name)
+        self.bucket = ensure_bucket_exists(self.storage_client, self.bucket_name, location)
         self.temp_dir = tempfile.gettempdir()
         
         logger.info("Initialized VideoMerger", project=project_id)

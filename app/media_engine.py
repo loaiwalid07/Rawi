@@ -30,6 +30,23 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 
+def ensure_bucket_exists(storage_client, bucket_name: str, location: str = "us-central1"):
+    """Create bucket if it doesn't exist"""
+    try:
+        bucket = storage_client.bucket(bucket_name)
+        if bucket.exists():
+            return bucket
+        
+        # Create the bucket
+        bucket.location = location
+        bucket.create()
+        logger.info(f"Created bucket: {bucket_name}")
+        return bucket
+    except Exception as e:
+        logger.warning(f"Could not create bucket {bucket_name}: {e}")
+        return None
+
+
 class ImageGenerator:
     """Generates images using Imagen"""
     
@@ -39,8 +56,10 @@ class ImageGenerator:
         
         if GCS_AVAILABLE:
             self.storage_client = storage.Client(project=project_id)
+            self.bucket = ensure_bucket_exists(self.storage_client, f"{project_id}-story-assets", location)
         else:
             self.storage_client = None
+            self.bucket = None
             
         self.bucket_name = f"{project_id}-story-assets"
         
@@ -63,6 +82,11 @@ class ImageGenerator:
         Returns:
             GCS URL of the generated image
         """
+        # Return mock URL if no bucket available
+        if not self.bucket:
+            logger.warning("No bucket available, returning mock image URL")
+            return f"https://via.placeholder.com/1280x720.png?text=Story+Image+Placeholder"
+        
         # Return mock URL for development
         if not VERTEXAI_AVAILABLE or not ImageGenerationModel:
             logger.warning("Vertex AI not available, returning mock image URL")
@@ -113,9 +137,11 @@ class VoiceGenerator:
         if GCS_AVAILABLE:
             self.client = texttospeech.TextToSpeechClient()
             self.storage_client = storage.Client(project=project_id)
+            self.bucket = ensure_bucket_exists(self.storage_client, f"{project_id}-story-assets", location)
         else:
             self.client = None
             self.storage_client = None
+            self.bucket = None
             
         self.bucket_name = f"{project_id}-story-assets"
         
@@ -143,6 +169,11 @@ class VoiceGenerator:
         # Auto-detect language from text
         if language == "auto":
             language = self._detect_language(text)
+        
+        # Return mock URL if no bucket available
+        if not self.bucket:
+            logger.warning("No bucket available, returning mock audio URL")
+            return f"https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3"
         
         # Return mock URL for development
         if not GCS_AVAILABLE or not self.client:
@@ -289,8 +320,10 @@ class VideoGenerator:
         
         if GCS_AVAILABLE:
             self.storage_client = storage.Client(project=project_id)
+            self.bucket = ensure_bucket_exists(self.storage_client, f"{project_id}-story-assets", location)
         else:
             self.storage_client = None
+            self.bucket = None
             
         self.bucket_name = f"{project_id}-story-assets"
         
@@ -313,6 +346,11 @@ class VideoGenerator:
         Returns:
             GCS URL of the generated video
         """
+        # Return mock URL if no bucket available
+        if not self.bucket:
+            logger.warning("No bucket available, returning mock video URL")
+            return "https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4"
+        
         # Return mock URL for development
         if not VERTEXAI_AVAILABLE or not VideoGenerationModel:
             logger.warning("Vertex AI Veo not available, returning mock video URL")
