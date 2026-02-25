@@ -214,9 +214,8 @@ class VideoMerger:
         blob = self.bucket.blob(gcs_path)
         
         await asyncio.to_thread(blob.upload_from_filename, local_file, content_type="video/mp4")
-        await asyncio.to_thread(blob.make_public)
         
-        gcs_url = blob.public_url
+        gcs_url = f"https://storage.googleapis.com/{self.bucket_name}/{gcs_path}"
         logger.info("Uploaded merged video", gcs_url=gcs_url)
         return gcs_url
     

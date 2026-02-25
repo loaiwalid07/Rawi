@@ -125,9 +125,9 @@ class ImageGenerator:
         blob = bucket.blob(filename)
         
         blob.upload_from_string(image_bytes, content_type="image/png")
-        blob.make_public()
         
-        return blob.public_url
+        # Generate public URL directly (bucket must be publicly readable)
+        return f"https://storage.googleapis.com/{self.bucket_name}/{filename}"
 
 
 class VoiceGenerator:
@@ -312,9 +312,8 @@ class VoiceGenerator:
         blob = bucket.blob(filename)
         
         blob.upload_from_string(audio_content, content_type="audio/mpeg")
-        blob.make_public()
         
-        return blob.public_url
+        return f"https://storage.googleapis.com/{self.bucket_name}/{filename}"
 
 
 class VideoGenerator:
@@ -390,9 +389,8 @@ class VideoGenerator:
         blob = bucket.blob(filename)
         
         blob.upload_from_string(video_bytes, content_type="video/mp4")
-        blob.make_public()
         
-        return blob.public_url
+        return f"https://storage.googleapis.com/{self.bucket_name}/{filename}"
 
 
 class MediaEngine:
