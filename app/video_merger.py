@@ -8,6 +8,9 @@ import subprocess
 import tempfile
 import uuid
 from typing import Dict, Any, List
+from dotenv import load_dotenv
+load_dotenv()
+
 from google.cloud import storage
 import structlog
 
@@ -35,12 +38,15 @@ class VideoMerger:
     def __init__(self, project_id: str, location: str = "us-central1"):
         self.project_id = project_id
         self.location = location
+        
+        # Use bucket from env or generate default
+        self.bucket_name = os.getenv("STORAGE_BUCKET_NAME", f"{project_id}-story-assets")
+        
         self.storage_client = storage.Client(project=project_id)
-        self.bucket_name = f"{project_id}-story-assets"
         self.bucket = ensure_bucket_exists(self.storage_client, self.bucket_name, location)
         self.temp_dir = tempfile.gettempdir()
         
-        logger.info("Initialized VideoMerger", project=project_id)
+        logger.info("Initialized VideoMerger", project=project_id, bucket=self.bucket_name)
     
     async def merge_segments(
         self,

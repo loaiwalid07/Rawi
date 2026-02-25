@@ -5,6 +5,8 @@ Media Engine - Integrates Imagen, Veo, and Gemini TTS for media generation
 import os
 import uuid
 from typing import Dict, Any, Optional
+from dotenv import load_dotenv
+load_dotenv()
 
 # Mock Google Cloud imports for development
 try:
@@ -54,16 +56,17 @@ class ImageGenerator:
         self.project_id = project_id
         self.location = location
         
+        # Use bucket from env or generate default
+        self.bucket_name = os.getenv("STORAGE_BUCKET_NAME", f"{project_id}-story-assets")
+        
         if GCS_AVAILABLE:
             self.storage_client = storage.Client(project=project_id)
-            self.bucket = ensure_bucket_exists(self.storage_client, f"{project_id}-story-assets", location)
+            self.bucket = ensure_bucket_exists(self.storage_client, self.bucket_name, location)
         else:
             self.storage_client = None
             self.bucket = None
-            
-        self.bucket_name = f"{project_id}-story-assets"
         
-        logger.info("Initialized ImageGenerator", project=project_id)
+        logger.info("Initialized ImageGenerator", project=project_id, bucket=self.bucket_name)
     
     async def generate(
         self,
@@ -134,16 +137,19 @@ class VoiceGenerator:
         self.project_id = project_id
         self.location = location
         
+        # Use bucket from env or generate default
+        self.bucket_name = os.getenv("STORAGE_BUCKET_NAME", f"{project_id}-story-assets")
+        
         if GCS_AVAILABLE:
             self.client = texttospeech.TextToSpeechClient()
             self.storage_client = storage.Client(project=project_id)
-            self.bucket = ensure_bucket_exists(self.storage_client, f"{project_id}-story-assets", location)
+            self.bucket = ensure_bucket_exists(self.storage_client, self.bucket_name, location)
         else:
             self.client = None
             self.storage_client = None
             self.bucket = None
-            
-        self.bucket_name = f"{project_id}-story-assets"
+        
+        logger.info("Initialized VoiceGenerator", project=project_id, bucket=self.bucket_name)
         
         logger.info("Initialized VoiceGenerator", project=project_id)
     
@@ -318,16 +324,17 @@ class VideoGenerator:
         self.project_id = project_id
         self.location = location
         
+        # Use bucket from env or generate default
+        self.bucket_name = os.getenv("STORAGE_BUCKET_NAME", f"{project_id}-story-assets")
+        
         if GCS_AVAILABLE:
             self.storage_client = storage.Client(project=project_id)
-            self.bucket = ensure_bucket_exists(self.storage_client, f"{project_id}-story-assets", location)
+            self.bucket = ensure_bucket_exists(self.storage_client, self.bucket_name, location)
         else:
             self.storage_client = None
             self.bucket = None
-            
-        self.bucket_name = f"{project_id}-story-assets"
         
-        logger.info("Initialized VideoGenerator", project=project_id)
+        logger.info("Initialized VideoGenerator", project=project_id, bucket=self.bucket_name)
     
     async def generate(
         self,
