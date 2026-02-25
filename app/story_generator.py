@@ -63,21 +63,27 @@ class StoryGenerator:
         """
         # If model is not available, return mock data for development
         if not self.model:
+            logger.warning("No Vertex AI model available, using mock story plan")
             return self._get_mock_story_plan(topic, audience, metaphor, num_segments)
         
-        prompt = self._create_story_plan_prompt(topic, audience, metaphor, num_segments)
-        
-        response = await self.model.generate_content_async(prompt)
-        story_plan = self._parse_story_plan(response.text, num_segments)
-        
-        logger.info(
-            "Generated story plan",
-            topic=topic,
-            audience=audience,
-            num_segments=len(story_plan.get("segments", []))
-        )
-        
-        return story_plan
+        try:
+            prompt = self._create_story_plan_prompt(topic, audience, metaphor, num_segments)
+            
+            response = await self.model.generate_content_async(prompt)
+            story_plan = self._parse_story_plan(response.text, num_segments)
+            
+            logger.info(
+                "Generated story plan",
+                topic=topic,
+                audience=audience,
+                num_segments=len(story_plan.get("segments", []))
+            )
+            
+            return story_plan
+            
+        except Exception as e:
+            logger.error(f"Vertex AI failed: {e}, using mock story plan")
+            return self._get_mock_story_plan(topic, audience, metaphor, num_segments)
     
     def _get_mock_story_plan(
         self,

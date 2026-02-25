@@ -85,19 +85,30 @@ class RawiAgent:
     
     def __init__(self, project_id: Optional[str] = None):
         # Initialize configuration first
-        self._project_id = project_id or os.getenv("GOOGLE_CLOUD_PROJECT") or "rawi-demo"
+        env_project = os.getenv("GOOGLE_CLOUD_PROJECT")
+        self._project_id = project_id or env_project
+        
+        if not self._project_id:
+            print("\n" + "="*60)
+            print("⚠️  WARNING: No Google Cloud project ID configured!")
+            print("="*60)
+            print("Please set GOOGLE_CLOUD_PROJECT in .env file or environment variable.")
+            print("Example: GOOGLE_CLOUD_PROJECT=your-project-id")
+            print("="*60 + "\n")
+        
         self._location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+        self._mock_mode = not bool(self._project_id or env_project)
         
         # Initialize media engines
-        self.image_gen = ImageGenerator(project_id=self._project_id)
-        self.voice_gen = VoiceGenerator(project_id=self._project_id)
-        self.video_gen = VideoGenerator(project_id=self._project_id)
-        self.video_merger = VideoMerger(project_id=self._project_id)
+        self.image_gen = ImageGenerator(project_id=self._project_id or "demo")
+        self.voice_gen = VoiceGenerator(project_id=self._project_id or "demo")
+        self.video_gen = VideoGenerator(project_id=self._project_id or "demo")
+        self.video_merger = VideoMerger(project_id=self._project_id or "demo")
         
         # Initialize sub-agents
-        self.director = DirectorAgent(project_id=self._project_id)
-        self.storyboard_agent = StoryboardAgent(project_id=self._project_id)
-        self.media_engine = MediaEngine(project_id=self._project_id)
+        self.director = DirectorAgent(project_id=self._project_id or "demo")
+        self.storyboard_agent = StoryboardAgent(project_id=self._project_id or "demo")
+        self.media_engine = MediaEngine(project_id=self._project_id or "demo")
         
         # Define tools for ADK
         self.tools = [
