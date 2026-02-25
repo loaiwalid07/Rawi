@@ -124,22 +124,26 @@ class VoiceGenerator:
     async def generate(
         self,
         text: str,
-        voice: str = "male-1",
+        voice: str = "male",
         emotion: str = "warm",
-        language: str = "en"
+        language: str = "auto"
     ) -> str:
         """
         Generate voiceover audio using Gemini TTS.
         
         Args:
             text: Text to convert to speech
-            voice: Voice type
+            voice: Voice type (male, female, neutral)
             emotion: Emotional tone
-            language: Language code
+            language: Language code (auto-detect if "auto")
             
         Returns:
             GCS URL of the generated audio
         """
+        # Auto-detect language from text
+        if language == "auto":
+            language = self._detect_language(text)
+        
         # Return mock URL for development
         if not GCS_AVAILABLE or not self.client:
             logger.warning("Google Cloud TTS not available, returning mock audio URL")
@@ -147,10 +151,13 @@ class VoiceGenerator:
         
         synthesis_input = texttospeech.SynthesisInput(text=text)
         
-        # Configure voice based on emotion
+        # Get voice name based on language and gender
+        voice_name = self._get_voice_name(language, voice)
+        
+        # Configure voice
         voice_params = texttospeech.VoiceSelectionParams(
-            language_code=f"{language}-US",
-            name=f"{language}-US-{voice}"
+            language_code=language,
+            name=voice_name
         )
         
         # Adjust audio config based on emotion
@@ -163,7 +170,7 @@ class VoiceGenerator:
             pitch=pitch
         )
         
-        logger.info("Generating voiceover", text_length=len(text), emotion=emotion)
+        logger.info("Generating voiceover", text_length=len(text), emotion=emotion, language=language)
         
         response = self.client.synthesize_speech(
             input=synthesis_input,
@@ -177,6 +184,68 @@ class VoiceGenerator:
         
         logger.info("Voiceover generated and uploaded", gcs_url=gcs_url)
         return gcs_url
+    
+    def _detect_language(self, text: str) -> str:
+        """Auto-detect language from text"""
+        # Simple language detection based on common words
+        text_lower = text.lower()
+        
+        # Arabic indicators
+        arabic_indicators = ['في', 'من', 'إلى', 'هذا', 'تلك', 'التي', 'الذي', 'كان', 'هو', 'هي', 'و', 'أو', 'هل']
+        if any(word in text_lower for word in arabic_indicators):
+            return "ar-SA"
+        
+        # French indicators
+        french_indicators = ['le', 'la', 'les', 'un', 'une', 'des', 'et', 'est', 'sont', 'avec', 'pour', 'dans', 'ce', 'cette']
+        if any(word in text_lower for word in french_indicators):
+            return "fr-FR"
+        
+        # Spanish indicators
+        spanish_indicators = ['el', 'la', 'los', 'las', 'un', 'una', 'es', 'son', 'con', 'para', 'en', 'que', 'como']
+        if any(word in text_lower for word in spanish_indicators):
+            return "es-ES"
+        
+        # German indicators
+        german_indicators = ['der', 'die', 'das', 'und', 'ist', 'sind', 'mit', 'für', 'ein', 'eine', 'zu', 'auf']
+        if any(word in text_lower for word in german_indicators):
+            return "de-DE"
+        
+        # Default to English
+        return "en-US"
+    
+    def _get_voice_name(self, language: str, voice_type: str = "male") -> str:
+        """Get valid voice name based on language and gender"""
+        # Standard Google Cloud TTS voices
+        voices = {
+            "en-US": {
+                "male": "en-US-Neural2-J",
+                "female": "en-US-Neural2-F",
+                "neutral": "en-US-Neural2-D"
+            },
+            "ar-SA": {
+                "male": "ar-SA-Neural2-A",
+                "female": "ar-SA-Neural2-B",
+                "neutral": "ar-SA-Neural2-A"
+            },
+            "fr-FR": {
+                "male": "fr-FR-Neural2-D",
+                "female": "fr-FR-Neural2-E",
+                "neutral": "fr-FR-Neural2-D"
+            },
+            "es-ES": {
+                "male": "es-ES-Neural2-D",
+                "female": "es-ES-Neural2-F",
+                "neutral": "es-ES-Neural2-D"
+            },
+            "de-DE": {
+                "male": "de-DE-Neural2-C",
+                "female": "de-DE-Neural2-F",
+                "neutral": "de-DE-Neural2-C"
+            }
+        }
+        
+        lang_voices = voices.get(language, voices["en-US"])
+        return lang_voices.get(voice_type, lang_voices["neutral"])
     
     def _get_speaking_rate(self, emotion: str) -> float:
         """Get speaking rate based on emotion"""
@@ -296,7 +365,8 @@ class MediaEngine:
         image_prompt: str,
         voiceover_text: str,
         video_prompt: str,
-        emotion: str = "warm"
+        emotion: str = "warm",
+        language: str = "auto"
     ) -> Dict[str, str]:
         """
         Generate all media for a story segment.
@@ -306,6 +376,7 @@ class MediaEngine:
             voiceover_text: Text for voiceover
             video_prompt: Prompt for video generation
             emotion: Emotional tone
+            language: Language code (auto-detect if "auto")
             
         Returns:
             Dictionary with URLs for all generated media
@@ -315,7 +386,7 @@ class MediaEngine:
         
         image_url, voiceover_url, video_url = await asyncio.gather(
             self.image_gen.generate(image_prompt),
-            self.voice_gen.generate(voiceover_text, emotion=emotion),
+            self.voice_gen.generate(voiceover_text, emotion=emotion, language=language),
             self.video_gen.generate(video_prompt)
         )
         

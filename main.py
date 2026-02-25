@@ -219,7 +219,8 @@ class RawiAgent:
                     image_prompt=image_prompt,
                     voiceover_text=segment['narration'],
                     video_prompt=video_prompt,
-                    emotion=segment.get('emotion', 'warm')
+                    emotion=segment.get('emotion', 'warm'),
+                    language="auto"
                 )
                 
                 # Add to collections
@@ -342,9 +343,9 @@ class RawiAgent:
         """ADK tool: Generate emotive voiceover"""
         voiceover_url = await self.voice_gen.generate(
             text=text,
-            voice="male-1",
+            voice="male",
             emotion=emotion,
-            language="en"
+            language="auto"
         )
         
         return {"audio_url": voiceover_url, "text": text, "emotion": emotion}
