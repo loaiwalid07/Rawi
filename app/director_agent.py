@@ -1,10 +1,31 @@
 """
-Director Agent - Main orchestrator for the RAWI storytelling pipeline
+Director Agent - Main orchestrator for RAWI storytelling pipeline
 """
 
 import os
-from typing import Dict, Any, List
-from google.adk import Agent, Tool, Context
+from typing import Dict, Any, List, Optional
+
+# Mock ADK imports for development
+try:
+    from google.adk.agents import Agent
+    from google.adk.tools import FunctionTool as Tool
+    ADK_AVAILABLE = True
+except ImportError:
+    ADK_AVAILABLE = False
+    
+    class Agent:
+        def __init__(self, name, description, tools=None, model=None):
+            self.name = name
+            self.description = description
+            self.tools = tools or []
+            self.model = model
+    
+    class Tool:
+        def __init__(self, name, description, func):
+            self.name = name
+            self.description = description
+            self.func = func
+
 from app.story_generator import StoryGenerator
 from app.models.story_frame import StoryFrame
 import structlog
@@ -12,18 +33,18 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 
-class DirectorAgent(Agent):
+class DirectorAgent:
     """
-    Main orchestrator that coordinates the storytelling pipeline.
+    Main orchestrator that coordinates storytelling pipeline.
     Breaks down topics into manageable segments and coordinates other agents.
     """
     
     def __init__(self, project_id: str, location: str = "us-central1"):
-        self.project_id = project_id
-        self.location = location
+        self._project_id = project_id
+        self._location = location
         self.story_generator = StoryGenerator(project_id, location)
         
-        tools = [
+        self.tools = [
             Tool(
                 name="plan_story",
                 description="Plan a story by breaking it into segments",
@@ -36,12 +57,10 @@ class DirectorAgent(Agent):
             )
         ]
         
-        super().__init__(
-            name="director_agent",
-            description="Orchestrates the storytelling pipeline",
-            tools=tools,
-            model="gemini-3-flash"
-        )
+        # Agent metadata
+        self.name = "director_agent"
+        self.description = "Orchestrates the storytelling pipeline"
+        self.model = "gemini-3-flash"
         
         logger.info("Initialized DirectorAgent", project=project_id)
     

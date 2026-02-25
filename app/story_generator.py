@@ -3,9 +3,19 @@ Story Generator - Uses Gemini 3 Flash to create engaging story narratives
 """
 
 import os
-from typing import Dict, Any, List
-from google.cloud import aiplatform
-from vertexai.preview.generative_models import GenerativeModel, Part
+import json
+from typing import Dict, Any, List, Optional
+
+# Mock Vertex AI imports for development
+try:
+    import vertexai
+    from vertexai.preview.generative_models import GenerativeModel, Part
+    VERTEXAI_AVAILABLE = True
+except ImportError:
+    VERTEXAI_AVAILABLE = False
+    GenerativeModel = None
+    Part = None
+
 from app.models.story_frame import StoryFrame
 import structlog
 
@@ -18,8 +28,19 @@ class StoryGenerator:
     def __init__(self, project_id: str, location: str = "us-central1"):
         self.project_id = project_id
         self.location = location
-        self.model = GenerativeModel("gemini-3-flash")
-        logger.info("Initialized StoryGenerator", project=project_id, location=location)
+        self.model = None
+        
+        if VERTEXAI_AVAILABLE and GenerativeModel:
+            try:
+                # Initialize Vertex AI
+                vertexai.init(project=project_id, location=location)
+                self.model = GenerativeModel("gemini-3-flash")
+                logger.info("Initialized StoryGenerator with Vertex AI", project=project_id, location=location)
+            except Exception as e:
+                logger.warning(f"Failed to initialize Vertex AI: {e}, using mock mode")
+                self.model = None
+        else:
+            logger.warning("Vertex AI not available, using mock responses")
     
     async def generate_story_plan(
         self,
@@ -40,6 +61,10 @@ class StoryGenerator:
         Returns:
             Story plan with narration, visual elements, and structure
         """
+        # If model is not available, return mock data for development
+        if not self.model:
+            return self._get_mock_story_plan(topic, audience, metaphor, num_segments)
+        
         prompt = self._create_story_plan_prompt(topic, audience, metaphor, num_segments)
         
         response = await self.model.generate_content_async(prompt)
@@ -53,6 +78,34 @@ class StoryGenerator:
         )
         
         return story_plan
+    
+    def _get_mock_story_plan(
+        self,
+        topic: str,
+        audience: str,
+        metaphor: Optional[str],
+        num_segments: int
+    ) -> Dict[str, Any]:
+        """Return mock story plan for development when AI is not available"""
+        metaphor_text = f" using the metaphor of {metaphor}" if metaphor else ""
+        
+        segments = []
+        for i in range(1, num_segments + 1):
+            segments.append({
+                "id": i,
+                "title": f"Part {i}: {topic}",
+                "narration": f"Once upon a time, there was a story about {topic}{metaphor_text}. This is segment {i} of the story, where we learn important lessons about {topic}.",
+                "visual_elements": ["illustration", "characters", "scene"],
+                "emotion": "warm",
+                "transition": "fade" if i < num_segments else "end",
+                "duration": 15.0
+            })
+        
+        return {
+            "title": f"The Story of {topic}",
+            "segments": segments,
+            "summary": f"An educational story about {topic}{metaphor_text} for {audience}-olds."
+        }
     
     async def generate_narration(
         self,
@@ -73,6 +126,10 @@ class StoryGenerator:
         Returns:
             Engaging narrative text
         """
+        # If model is not available, return mock data
+        if not self.model:
+            return f"Once upon a time, there was a story about {topic}. " + " ".join(key_points[:2]) + " And so the adventure continued..."
+        
         prompt = f"""
         Write an engaging {tone} {style} narrative about {topic}.
         

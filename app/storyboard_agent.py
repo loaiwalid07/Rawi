@@ -2,31 +2,62 @@
 Storyboard Agent - Generates detailed storyboard descriptions for Veo video generation
 """
 
-from typing import Dict, Any, List
-from google.adk import Agent
-from vertexai.preview.generative_models import GenerativeModel
+from typing import Dict, Any, List, Optional
+
+# Mock ADK imports for development
+try:
+    from google.adk import Agent
+    ADK_AVAILABLE = True
+except ImportError:
+    ADK_AVAILABLE = False
+    
+    class Agent:
+        def __init__(self, name, description, tools=None, model=None):
+            self.name = name
+            self.description = description
+            self.tools = tools or []
+            self.model = model
+
+# Mock Vertex AI for development
+try:
+    import vertexai
+    from vertexai.preview.generative_models import GenerativeModel
+    VERTEXAI_AVAILABLE = True
+except ImportError:
+    VERTEXAI_AVAILABLE = False
+    GenerativeModel = None
+
 from app.models.story_frame import StoryboardFrame
 import structlog
 
 logger = structlog.get_logger(__name__)
 
 
-class StoryboardAgent(Agent):
+class StoryboardAgent:
     """
     Generates detailed storyboard visual descriptions that guide Veo video generation.
     Creates camera angles, transitions, color palettes, and character actions.
     """
     
     def __init__(self, project_id: str, location: str = "us-central1"):
-        self.project_id = project_id
-        self.location = location
-        self.model = GenerativeModel("gemini-3-flash")
+        self._project_id = project_id
+        self._location = location
+        self.model = None
         
-        super().__init__(
-            name="storyboard_agent",
-            description="Generates storyboard visual descriptions",
-            model="gemini-3-flash"
-        )
+        if VERTEXAI_AVAILABLE and GenerativeModel:
+            try:
+                vertexai.init(project=project_id, location=location)
+                self.model = GenerativeModel("gemini-3-flash")
+                logger.info("Initialized StoryboardAgent with Vertex AI", project=project_id)
+            except Exception as e:
+                logger.warning(f"Failed to initialize Vertex AI: {e}, using mock mode")
+                self.model = None
+        else:
+            logger.warning("Vertex AI not available, using mock mode")
+        
+        # Agent metadata
+        self.name = "storyboard_agent"
+        self.description = "Generates storyboard visual descriptions"
         
         logger.info("Initialized StoryboardAgent", project=project_id)
     

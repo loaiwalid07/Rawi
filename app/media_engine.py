@@ -5,9 +5,26 @@ Media Engine - Integrates Imagen, Veo, and Gemini TTS for media generation
 import os
 import uuid
 from typing import Dict, Any, Optional
-from google.cloud import storage
-from google.cloud import texttospeech
-from google.cloud import aiplatform
+
+# Mock Google Cloud imports for development
+try:
+    from google.cloud import storage
+    from google.cloud import texttospeech
+    GCS_AVAILABLE = True
+except ImportError:
+    GCS_AVAILABLE = False
+    storage = None
+    texttospeech = None
+
+# Mock Vertex AI for development
+try:
+    from vertexai.preview.vision_models import ImageGenerationModel, VideoGenerationModel
+    VERTEXAI_AVAILABLE = True
+except ImportError:
+    VERTEXAI_AVAILABLE = False
+    ImageGenerationModel = None
+    VideoGenerationModel = None
+
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -19,7 +36,12 @@ class ImageGenerator:
     def __init__(self, project_id: str, location: str = "us-central1"):
         self.project_id = project_id
         self.location = location
-        self.storage_client = storage.Client(project=project_id)
+        
+        if GCS_AVAILABLE:
+            self.storage_client = storage.Client(project=project_id)
+        else:
+            self.storage_client = None
+            
         self.bucket_name = f"{project_id}-story-assets"
         
         logger.info("Initialized ImageGenerator", project=project_id)
@@ -41,6 +63,11 @@ class ImageGenerator:
         Returns:
             GCS URL of the generated image
         """
+        # Return mock URL for development
+        if not VERTEXAI_AVAILABLE or not ImageGenerationModel:
+            logger.warning("Vertex AI not available, returning mock image URL")
+            return f"https://via.placeholder.com/1280x720.png?text=Story+Image+Placeholder"
+        
         from vertexai.preview.vision_models import ImageGenerationModel
         
         model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-001")
@@ -82,8 +109,14 @@ class VoiceGenerator:
     def __init__(self, project_id: str, location: str = "us-central1"):
         self.project_id = project_id
         self.location = location
-        self.client = texttospeech.TextToSpeechClient()
-        self.storage_client = storage.Client(project=project_id)
+        
+        if GCS_AVAILABLE:
+            self.client = texttospeech.TextToSpeechClient()
+            self.storage_client = storage.Client(project=project_id)
+        else:
+            self.client = None
+            self.storage_client = None
+            
         self.bucket_name = f"{project_id}-story-assets"
         
         logger.info("Initialized VoiceGenerator", project=project_id)
@@ -107,6 +140,11 @@ class VoiceGenerator:
         Returns:
             GCS URL of the generated audio
         """
+        # Return mock URL for development
+        if not GCS_AVAILABLE or not self.client:
+            logger.warning("Google Cloud TTS not available, returning mock audio URL")
+            return f"https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3"
+        
         synthesis_input = texttospeech.SynthesisInput(text=text)
         
         # Configure voice based on emotion
@@ -179,7 +217,12 @@ class VideoGenerator:
     def __init__(self, project_id: str, location: str = "us-central1"):
         self.project_id = project_id
         self.location = location
-        self.storage_client = storage.Client(project=project_id)
+        
+        if GCS_AVAILABLE:
+            self.storage_client = storage.Client(project=project_id)
+        else:
+            self.storage_client = None
+            
         self.bucket_name = f"{project_id}-story-assets"
         
         logger.info("Initialized VideoGenerator", project=project_id)
@@ -201,6 +244,11 @@ class VideoGenerator:
         Returns:
             GCS URL of the generated video
         """
+        # Return mock URL for development
+        if not VERTEXAI_AVAILABLE or not VideoGenerationModel:
+            logger.warning("Vertex AI Veo not available, returning mock video URL")
+            return "https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4"
+        
         from vertexai.preview.vision_models import VideoGenerationModel
         
         model = VideoGenerationModel.from_pretrained("veo-2.0-generate-001")

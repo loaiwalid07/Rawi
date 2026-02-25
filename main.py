@@ -14,9 +14,13 @@ import uvicorn
 
 # Mock google.adk imports for development (replace with actual imports when available)
 try:
-    from google.adk import Agent, Tool, Context
+    from google.adk.agents import Agent
+    from google.adk.tools import FunctionTool as Tool
+    ADK_AVAILABLE = True
 except ImportError:
     print("Warning: google-adk not installed, using mock classes")
+    ADK_AVAILABLE = False
+    
     class Agent:
         def __init__(self, name, description, tools=None, model=None):
             self.name = name
@@ -30,10 +34,10 @@ except ImportError:
             self.description = description
             self.func = func
     
-    class Context:
-        def __init__(self, user_id, session_id):
-            self.user_id = user_id
-            self.session_id = session_id
+class Context:
+    def __init__(self, user_id, session_id):
+        self.user_id = user_id
+        self.session_id = session_id
 
 from app.director_agent import DirectorAgent
 from app.media_engine import MediaEngine, ImageGenerator, VoiceGenerator, VideoGenerator
@@ -64,29 +68,30 @@ class StoryOutput:
     interleaved_stream: List[InterleavedSegment]
 
 
-class RawiAgent(Agent):
+class RawiAgent:
     """
     Main RAWI agent that orchestrates storytelling using Google ADK.
     Transforms educational topics into immersive multimodal stories.
     """
     
     def __init__(self, project_id: Optional[str] = None):
-        self.project_id = project_id or os.getenv("GOOGLE_CLOUD_PROJECT")
-        self.location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+        # Initialize configuration first
+        self._project_id = project_id or os.getenv("GOOGLE_CLOUD_PROJECT") or "rawi-demo"
+        self._location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
         
         # Initialize media engines
-        self.image_gen = ImageGenerator(project_id=self.project_id)
-        self.voice_gen = VoiceGenerator(project_id=self.project_id)
-        self.video_gen = VideoGenerator(project_id=self.project_id)
-        self.video_merger = VideoMerger(project_id=self.project_id)
+        self.image_gen = ImageGenerator(project_id=self._project_id)
+        self.voice_gen = VoiceGenerator(project_id=self._project_id)
+        self.video_gen = VideoGenerator(project_id=self._project_id)
+        self.video_merger = VideoMerger(project_id=self._project_id)
         
         # Initialize sub-agents
-        self.director = DirectorAgent(project_id=self.project_id)
-        self.storyboard_agent = StoryboardAgent(project_id=self.project_id)
-        self.media_engine = MediaEngine(project_id=self.project_id)
+        self.director = DirectorAgent(project_id=self._project_id)
+        self.storyboard_agent = StoryboardAgent(project_id=self._project_id)
+        self.media_engine = MediaEngine(project_id=self._project_id)
         
         # Define tools for ADK
-        tools = [
+        self.tools = [
             Tool(
                 name="generate_storyboard",
                 description="Generate storyboard images for story segments",
@@ -109,14 +114,22 @@ class RawiAgent(Agent):
             )
         ]
         
-        super().__init__(
-            name="rawi_storyteller",
-            description="Transforms educational topics into immersive multimodal stories",
-            tools=tools,
-            model="gemini-3-flash"
-        )
+        # Agent metadata
+        self.name = "rawi_storyteller"
+        self.description = "Transforms educational topics into immersive multimodal stories"
+        self.model = "gemini-3-flash"
         
-        logger.info("Initialized RawiAgent", project_id=self.project_id)
+        logger.info("Initialized RawiAgent", project_id=self._project_id)
+    
+    @property
+    def project_id(self):
+        """Get project ID for backward compatibility"""
+        return self._project_id
+    
+    @property
+    def location(self):
+        """Get location for backward compatibility"""
+        return self._location
     
     async def tell_story(self, request: StoryRequest) -> StoryOutput:
         """
