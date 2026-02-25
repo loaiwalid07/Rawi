@@ -5,10 +5,13 @@ Main entry point for the RawiAgent using Google ADK
 
 import os
 import asyncio
+from pathlib import Path
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
 
@@ -99,23 +102,23 @@ class RawiAgent:
         # Define tools for ADK
         self.tools = [
             Tool(
-                name="generate_storyboard",
-                description="Generate storyboard images for story segments",
+                # name="generate_storyboard",
+                # description="Generate storyboard images for story segments",
                 func=self._generate_storyboard_tool
             ),
             Tool(
-                name="generate_video_segment",
-                description="Generate video segment using Veo",
+                # name="generate_video_segment",
+                # description="Generate video segment using Veo",
                 func=self._generate_video_segment_tool
             ),
             Tool(
-                name="generate_voiceover",
-                description="Generate emotive voiceover using Gemini TTS",
+                # name="generate_voiceover",
+                # description="Generate emotive voiceover using Gemini TTS",
                 func=self._generate_voiceover_tool
             ),
             Tool(
-                name="merge_videos",
-                description="Merge multiple video segments into final video",
+                # name="merge_videos",
+                # description="Merge multiple video segments into final video",
                 func=self._merge_videos_tool
             )
         ]
@@ -358,6 +361,48 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Get the base directory
+BASE_DIR = Path(__file__).parent
+FRONTEND_DIR = BASE_DIR / "frontend"
+
+# Mount static files if frontend directory exists
+if FRONTEND_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+
+
+@app.get("/", response_class=HTMLResponse)
+async def serve_frontend():
+    """Serve the main frontend page"""
+    index_file = FRONTEND_DIR / "index.html"
+    
+    if index_file.exists():
+        return FileResponse(str(index_file))
+    
+    return HTMLResponse(
+        content="""
+        <html>
+            <head><title>RAWI - The Storyteller</title></head>
+            <body>
+                <h1>RAWI - The Storyteller</h1>
+                <p>API is running. Frontend not found.</p>
+                <p>API Endpoints:</p>
+                <ul>
+                    <li>POST /tell-story - Generate a story</li>
+                    <li>GET /health - Health check</li>
+                    <li>GET /docs - API documentation</li>
+                </ul>
+            </body>
+        </html>
+        """,
+        status_code=200
+    )
+
+
+@app.get("/ui")
+async def serve_ui():
+    """Alias endpoint for serving the frontend"""
+    return await serve_frontend()
 
 
 class StoryRequestAPI(BaseModel):

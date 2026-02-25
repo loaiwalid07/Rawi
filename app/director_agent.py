@@ -52,13 +52,13 @@ class DirectorAgent:
         
         self.tools = [
             Tool(
-                name="plan_story",
-                description="Plan a story by breaking it into segments",
+                # name="plan_story",
+                # description="Plan a story by breaking it into segments",
                 func=self.plan_story
             ),
             Tool(
-                name="generate_narration",
-                description="Generate narrative text for a story segment",
+                # name="generate_narration",
+                # description="Generate narrative text for a story segment",
                 func=self.generate_narration
             )
         ]
