@@ -6,6 +6,11 @@ Main entry point for the RawiAgent using Google ADK
 import os
 import asyncio
 from pathlib import Path
+
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
+
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from fastapi import FastAPI, HTTPException
