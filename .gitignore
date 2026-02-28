@@ -1,3 +1,6 @@
+%USERPROFILE%
+local_media/
+nul
 # Python
 __pycache__/
 *.py[cod]

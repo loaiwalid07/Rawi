@@ -3,8 +3,12 @@ Media Engine - Integrates Imagen, Veo, and Gemini TTS for media generation
 """
 
 import os
+import asyncio
+import tempfile
 import uuid
-from typing import Dict, Any, Optional
+from pathlib import Path
+from urllib.parse import quote
+from typing import Dict, Optional, Tuple
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -18,14 +22,24 @@ except ImportError:
     storage = None
     texttospeech = None
 
-# Mock Vertex AI for development
+# Vertex image generation (Imagen)
 try:
-    from vertexai.preview.vision_models import ImageGenerationModel, VideoGenerationModel
-    VERTEXAI_AVAILABLE = True
+    from vertexai.preview.vision_models import ImageGenerationModel
+    IMAGEN_AVAILABLE = True
 except ImportError:
-    VERTEXAI_AVAILABLE = False
+    IMAGEN_AVAILABLE = False
     ImageGenerationModel = None
-    VideoGenerationModel = None
+
+# Vertex-compatible GenAI client (Veo)
+try:
+    from google import genai
+    from google.genai import types as genai_types
+    GENAI_AVAILABLE = True
+except ImportError:
+    GENAI_AVAILABLE = False
+    genai = None
+    genai_types = None
+
 
 import structlog
 
@@ -49,6 +63,46 @@ def ensure_bucket_exists(storage_client, bucket_name: str, location: str = "us-c
         return None
 
 
+def _to_public_storage_url(uri: str) -> str:
+    """Normalize GCS URI into https://storage.googleapis.com URL."""
+    if uri.startswith("gs://"):
+        without_scheme = uri[len("gs://"):]
+        bucket, _, blob_path = without_scheme.partition("/")
+        if not bucket:
+            return uri
+        if not blob_path:
+            return f"https://storage.googleapis.com/{bucket}"
+        return f"https://storage.googleapis.com/{bucket}/{quote(blob_path, safe='/')}"
+    return uri
+
+
+def _parse_gcs_uri(uri: str) -> Optional[Tuple[str, str]]:
+    """Parse gs://bucket/path or https://storage.googleapis.com/bucket/path."""
+    if uri.startswith("gs://"):
+        without_scheme = uri[len("gs://"):]
+        bucket, _, blob_path = without_scheme.partition("/")
+        if bucket and blob_path:
+            return bucket, blob_path
+        return None
+
+    if uri.startswith("https://storage.googleapis.com/"):
+        without_host = uri[len("https://storage.googleapis.com/"):]
+        bucket, _, blob_path = without_host.partition("/")
+        if bucket and blob_path:
+            return bucket, blob_path
+        return None
+
+    return None
+
+
+def _save_bytes_local(base_dir: str, relative_path: str, content: bytes):
+    """Save bytes to local output folder, preserving subdirectories."""
+    local_path = Path(base_dir) / relative_path
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    local_path.write_bytes(content)
+    return str(local_path)
+
+
 class ImageGenerator:
     """Generates images using Imagen"""
     
@@ -58,6 +112,7 @@ class ImageGenerator:
         
         # Use bucket from env or generate default
         self.bucket_name = os.getenv("STORAGE_BUCKET_NAME", f"{project_id}-story-assets")
+        self.local_output_dir = os.getenv("LOCAL_OUTPUT_DIR", "local_media")
         
         if GCS_AVAILABLE:
             self.storage_client = storage.Client(project=project_id)
@@ -68,7 +123,7 @@ class ImageGenerator:
         
         # Try to initialize Vertex AI for Imagen
         self.imagen_model = None
-        if VERTEXAI_AVAILABLE and ImageGenerationModel:
+        if IMAGEN_AVAILABLE and ImageGenerationModel:
             try:
                 import vertexai
                 vertexai.init(project=project_id, location=location)
@@ -114,11 +169,22 @@ class ImageGenerator:
                 )
                 
                 if images:
-                    # Save to GCS
                     filename = f"storyboards/{uuid.uuid4()}.png"
-                    gcs_url = await self._upload_to_gcs(images[0]._image_bytes, filename)
-                    logger.info("Image generated and uploaded", gcs_url=gcs_url)
-                    return gcs_url
+                    # Use public SDK method instead of private internals.
+                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                        temp_path = tmp.name
+                    try:
+                        images[0].save(temp_path, include_generation_parameters=False)
+                        with open(temp_path, "rb") as f:
+                            image_bytes = f.read()
+                        gcs_url = await self._upload_to_gcs(image_bytes, filename)
+                        logger.info("Image generated and uploaded", gcs_url=gcs_url)
+                        return gcs_url
+                    finally:
+                        try:
+                            os.remove(temp_path)
+                        except OSError:
+                            pass
             except Exception as e:
                 logger.warning(f"Imagen generation failed: {e}")
         
@@ -128,13 +194,16 @@ class ImageGenerator:
     
     async def _upload_to_gcs(self, image_bytes: bytes, filename: str) -> str:
         """Upload image bytes to Google Cloud Storage"""
+        local_path = _save_bytes_local(self.local_output_dir, filename, image_bytes)
+        logger.info("Saved image locally", local_path=local_path)
+
         bucket = self.storage_client.bucket(self.bucket_name)
         blob = bucket.blob(filename)
         
         blob.upload_from_string(image_bytes, content_type="image/png")
         
         # Generate public URL directly (bucket must be publicly readable)
-        return f"https://storage.googleapis.com/{self.bucket_name}/{filename}"
+        return _to_public_storage_url(f"gs://{self.bucket_name}/{filename}")
 
 
 class VoiceGenerator:
@@ -146,6 +215,7 @@ class VoiceGenerator:
         
         # Use bucket from env or generate default
         self.bucket_name = os.getenv("STORAGE_BUCKET_NAME", f"{project_id}-story-assets")
+        self.local_output_dir = os.getenv("LOCAL_OUTPUT_DIR", "local_media")
         
         if GCS_AVAILABLE:
             self.client = texttospeech.TextToSpeechClient()
@@ -315,6 +385,9 @@ class VoiceGenerator:
     
     async def _upload_to_gcs(self, audio_content: bytes, filename: str) -> str:
         """Upload audio content to Google Cloud Storage"""
+        local_path = _save_bytes_local(self.local_output_dir, filename, audio_content)
+        logger.info("Saved audio locally", local_path=local_path)
+
         bucket = self.storage_client.bucket(self.bucket_name)
         blob = bucket.blob(filename)
         
@@ -332,6 +405,7 @@ class VideoGenerator:
         
         # Use bucket from env or generate default
         self.bucket_name = os.getenv("STORAGE_BUCKET_NAME", f"{project_id}-story-assets")
+        self.local_output_dir = os.getenv("LOCAL_OUTPUT_DIR", "local_media")
         
         if GCS_AVAILABLE:
             self.storage_client = storage.Client(project=project_id)
@@ -340,16 +414,18 @@ class VideoGenerator:
             self.storage_client = None
             self.bucket = None
         
-        # Try to initialize Vertex AI for Veo
-        self.veo_model = None
-        if VERTEXAI_AVAILABLE and VideoGenerationModel:
+        # Initialize Vertex-compatible GenAI client for Veo.
+        self.genai_client = None
+        if GENAI_AVAILABLE and genai:
             try:
-                import vertexai
-                vertexai.init(project=project_id, location=location)
-                self.veo_model = VideoGenerationModel.from_pretrained("veo-2.0-generate-001")
-                logger.info("Initialized Veo model", project=project_id)
+                self.genai_client = genai.Client(
+                    vertexai=True,
+                    project=project_id,
+                    location=location,
+                )
+                logger.info("Initialized Veo client", project=project_id)
             except Exception as e:
-                logger.warning(f"Failed to initialize Veo: {e}")
+                logger.warning(f"Failed to initialize Veo client: {e}")
         
         logger.info("Initialized VideoGenerator", project=project_id, bucket=self.bucket_name)
     
@@ -375,22 +451,73 @@ class VideoGenerator:
             logger.warning("No bucket available, returning mock video URL")
             return "https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4"
         
-        # Try to use Veo
-        if self.veo_model:
+        # Try to use Veo via Vertex API.
+        if self.genai_client and genai_types:
             try:
                 logger.info("Generating video with Veo", prompt_length=len(prompt), duration=duration)
-                
-                videos = self.veo_model.generate_videos(
+
+                # Veo commonly supports short clips; clamp unsupported durations.
+                safe_duration = max(5, min(duration, 8))
+                if safe_duration != duration:
+                    logger.info("Adjusted video duration for Veo", requested=duration, used=safe_duration)
+
+                operation = await asyncio.to_thread(
+                    self.genai_client.models.generate_videos,
+                    model="veo-3.1-fast-generate-001",
                     prompt=prompt,
-                    duration=duration
+                    config=genai_types.GenerateVideosConfig(
+                        number_of_videos=1,
+                        duration_seconds=safe_duration,
+                        resolution=resolution,
+                        output_gcs_uri=f"gs://{self.bucket_name}/videos",
+                    ),
                 )
+
+                # Poll operation until done.
+                max_polls = 90  # 15 minutes at 10s interval.
+                for _ in range(max_polls):
+                    if getattr(operation, "done", False):
+                        break
+                    await asyncio.sleep(10)
+                    operation = await asyncio.to_thread(self.genai_client.operations.get, operation)
+
+                if not getattr(operation, "done", False):
+                    raise TimeoutError("Veo operation timed out before completion.")
+
+                response = getattr(operation, "response", None)
+                generated_videos = getattr(response, "generated_videos", None) if response else None
+
+                if generated_videos:
+                    video = generated_videos[0].video if generated_videos[0] else None
+                    if video and getattr(video, "uri", None):
+                        # Vertex already persisted output to GCS.
+                        parsed = _parse_gcs_uri(video.uri)
+                        if parsed and self.storage_client:
+                            src_bucket, src_blob = parsed
+                            try:
+                                blob = self.storage_client.bucket(src_bucket).blob(src_blob)
+                                local_path = str(Path(self.local_output_dir) / src_blob)
+                                Path(local_path).parent.mkdir(parents=True, exist_ok=True)
+                                await asyncio.to_thread(blob.download_to_filename, local_path)
+                                logger.info("Saved video locally", local_path=local_path)
+                            except Exception as save_err:
+                                logger.warning(f"Failed to save generated video locally: {save_err}")
+                        logger.info("Video generated and stored in GCS", uri=video.uri)
+                        return _to_public_storage_url(video.uri)
+                    if video and getattr(video, "video_bytes", None):
+                        filename = f"videos/{uuid.uuid4()}.mp4"
+                        gcs_url = await self._upload_to_gcs(video.video_bytes, filename)
+                        logger.info("Video generated and uploaded", gcs_url=gcs_url)
+                        return gcs_url
                 
-                if videos:
-                    # Save to GCS
-                    filename = f"videos/{uuid.uuid4()}.mp4"
-                    gcs_url = await self._upload_to_gcs(videos[0]._video_bytes, filename)
-                    logger.info("Video generated and uploaded", gcs_url=gcs_url)
-                    return gcs_url
+                # Better diagnostics when operation completes but no video returned.
+                filtered_count = getattr(response, "rai_media_filtered_count", None) if response else None
+                filtered_reasons = getattr(response, "rai_media_filtered_reasons", None) if response else None
+                logger.warning(
+                    "Veo operation completed without videos",
+                    filtered_count=filtered_count,
+                    filtered_reasons=filtered_reasons,
+                )
             except Exception as e:
                 logger.warning(f"Veo generation failed: {e}")
         
@@ -400,12 +527,15 @@ class VideoGenerator:
     
     async def _upload_to_gcs(self, video_bytes: bytes, filename: str) -> str:
         """Upload video bytes to Google Cloud Storage"""
+        local_path = _save_bytes_local(self.local_output_dir, filename, video_bytes)
+        logger.info("Saved video locally", local_path=local_path)
+
         bucket = self.storage_client.bucket(self.bucket_name)
         blob = bucket.blob(filename)
         
         blob.upload_from_string(video_bytes, content_type="video/mp4")
         
-        return f"https://storage.googleapis.com/{self.bucket_name}/{filename}"
+        return _to_public_storage_url(f"gs://{self.bucket_name}/{filename}")
 
 
 class MediaEngine:
