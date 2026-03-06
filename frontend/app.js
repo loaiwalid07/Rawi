@@ -126,7 +126,31 @@ class RawiApp {
 
         // Set video source
         const video = document.getElementById('storyVideo');
-        video.src = storyData.video_url;
+        const videoUrl = storyData.video_url;
+        
+        console.log('Video URL:', videoUrl);
+        console.log('Video URL type:', typeof videoUrl);
+        console.log('Video URL starts with http:', videoUrl?.startsWith('http'));
+        
+        // Check if video URL is valid (accept absolute or relative URLs)
+        if (videoUrl && (videoUrl.startsWith('http') || videoUrl.startsWith('https') || videoUrl.startsWith('file://') || videoUrl.startsWith('/'))) {
+            video.src = videoUrl;
+            console.log('Setting video src:', video.src);
+        } else {
+            console.error('Invalid video URL:', videoUrl);
+            // Show error in player
+            const videoContainer = document.querySelector('.video-container');
+            videoContainer.innerHTML = `
+                <div class="video-error" style="padding: 40px; text-align: center; background: #1a1a2e; border-radius: 10px;">
+                    <h3 style="color: #ff6b6b;">⚠️ Video Not Available</h3>
+                    <p style="color: #ccc;">The video is still being processed or an error occurred.</p>
+                    <p style="color: #888; font-size: 12px; word-break: break-all;">URL: ${videoUrl || 'No URL'}</p>
+                    <a href="${videoUrl}" target="_blank" class="btn btn-primary" style="margin-top: 15px; display: inline-block;">
+                        Open Video Directly
+                    </a>
+                </div>
+            `;
+        }
 
         // Set details
         document.getElementById('detailTopic').textContent = storyData.segments[0]?.narration?.split(' ').slice(0, 3).join(' ') || '-';
@@ -137,14 +161,31 @@ class RawiApp {
         document.getElementById('storyNarration').textContent = storyData.narration_text;
 
         // Set resource links
-        document.getElementById('downloadVideo').href = storyData.video_url;
-        document.getElementById('downloadAudio').href = storyData.voiceover_url;
+        document.getElementById('downloadVideo').href = storyData.video_url || '#';
+        document.getElementById('downloadAudio').href = storyData.voiceover_url || '#';
 
         // Initialize text bubbles
         this.initializeTextBubbles(storyData.interleaved_stream);
 
         // Load video
-        video.load();
+        if (video.src) {
+            video.load();
+            
+            // Add error handler
+            video.onerror = (e) => {
+                console.error('Video error:', e);
+                const videoContainer = document.querySelector('.video-container');
+                videoContainer.innerHTML = `
+                    <div class="video-error" style="padding: 40px; text-align: center; background: #1a1a2e; border-radius: 10px;">
+                        <h3 style="color: #ff6b6b;">⚠️ Video Error</h3>
+                        <p style="color: #ccc;">The video could not be loaded.</p>
+                        <a href="${videoUrl}" target="_blank" class="btn btn-primary" style="margin-top: 15px; display: inline-block;">
+                            Open Video Directly
+                        </a>
+                    </div>
+                `;
+            };
+        }
     }
 
     initializeTextBubbles(stream) {
@@ -183,13 +224,18 @@ class RawiApp {
         const progressBar = document.getElementById('progressBar');
         const currentTime = document.getElementById('currentTime');
 
+        if (!video || !video.duration || isNaN(video.duration)) return;
+
         // Update progress bar
         const progress = (video.currentTime / video.duration) * 100;
-        progressBar.style.setProperty('--progress', `${progress}%`);
-        progressBar.querySelector('::after').style.width = `${progress}%`;
+        if (progressBar) {
+            progressBar.style.width = `${progress}%`;
+        }
 
         // Update time display
-        currentTime.textContent = this.formatTime(video.currentTime);
+        if (currentTime) {
+            currentTime.textContent = this.formatTime(video.currentTime);
+        }
 
         // Update text bubbles based on current time
         this.updateTextBubbles(video.currentTime);
@@ -250,6 +296,7 @@ class RawiApp {
 
     seek(seconds) {
         const video = document.getElementById('storyVideo');
+        if (!video || !video.duration || isNaN(video.duration)) return;
         video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + seconds));
     }
 

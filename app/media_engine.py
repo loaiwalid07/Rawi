@@ -8,6 +8,7 @@ import tempfile
 import uuid
 from pathlib import Path
 from urllib.parse import quote
+from datetime import timedelta
 from typing import Dict, Optional, Tuple
 from dotenv import load_dotenv
 load_dotenv()
@@ -63,17 +64,24 @@ def ensure_bucket_exists(storage_client, bucket_name: str, location: str = "us-c
         return None
 
 
-def _to_public_storage_url(uri: str) -> str:
-    """Normalize GCS URI into https://storage.googleapis.com URL."""
+def _to_proxy_url(uri: str) -> str:
+    """Convert a GCS URI to a local proxy URL for serving via FastAPI."""
     if uri.startswith("gs://"):
         without_scheme = uri[len("gs://"):]
         bucket, _, blob_path = without_scheme.partition("/")
-        if not bucket:
-            return uri
-        if not blob_path:
-            return f"https://storage.googleapis.com/{bucket}"
-        return f"https://storage.googleapis.com/{bucket}/{quote(blob_path, safe='/')}"
+        if bucket and blob_path:
+            return f"/media/{bucket}/{quote(blob_path, safe='/')}"
+    elif uri.startswith("https://storage.googleapis.com/"):
+        without_host = uri[len("https://storage.googleapis.com/"):]
+        bucket, _, blob_path = without_host.partition("/")
+        if bucket and blob_path:
+            return f"/media/{bucket}/{quote(blob_path, safe='/')}"
     return uri
+
+
+def _to_proxy_video_url(bucket: str, blob_path: str) -> str:
+    """Create a proxy video URL for video content."""
+    return f"/video/{bucket}/{quote(blob_path, safe='/')}"
 
 
 def _parse_gcs_uri(uri: str) -> Optional[Tuple[str, str]]:
@@ -193,17 +201,31 @@ class ImageGenerator:
         return f"https://via.placeholder.com/1280x720.png?text=Story+Image+Placeholder"
     
     async def _upload_to_gcs(self, image_bytes: bytes, filename: str) -> str:
-        """Upload image bytes to Google Cloud Storage"""
+        """Upload image bytes to Google Cloud Storage and return signed URL"""
         local_path = _save_bytes_local(self.local_output_dir, filename, image_bytes)
         logger.info("Saved image locally", local_path=local_path)
 
-        bucket = self.storage_client.bucket(self.bucket_name)
-        blob = bucket.blob(filename)
+        if not self.bucket:
+            logger.warning("No bucket available, returning local path")
+            return f"file://{local_path}"
         
-        blob.upload_from_string(image_bytes, content_type="image/png")
-        
-        # Generate public URL directly (bucket must be publicly readable)
-        return _to_public_storage_url(f"gs://{self.bucket_name}/{filename}")
+        try:
+            bucket = self.storage_client.bucket(self.bucket_name)
+            blob = bucket.blob(filename)
+            
+            blob.upload_from_string(image_bytes, content_type="image/png")
+            logger.info("Uploaded image to GCS", filename=filename)
+            
+            # Generate signed URL for private bucket access
+            signed_url = blob.generate_signed_url(
+                version="v4",
+                expiration=timedelta(hours=24),
+                method="GET"
+            )
+            return signed_url
+        except Exception as e:
+            logger.error("Failed to upload image to GCS", error=str(e))
+            return _to_proxy_url(f"gs://{self.bucket_name}/{filename}")
 
 
 class VoiceGenerator:
@@ -384,16 +406,31 @@ class VoiceGenerator:
         return pitches.get(emotion.lower(), 1.0)
     
     async def _upload_to_gcs(self, audio_content: bytes, filename: str) -> str:
-        """Upload audio content to Google Cloud Storage"""
+        """Upload audio content to Google Cloud Storage and return signed URL"""
         local_path = _save_bytes_local(self.local_output_dir, filename, audio_content)
         logger.info("Saved audio locally", local_path=local_path)
 
-        bucket = self.storage_client.bucket(self.bucket_name)
-        blob = bucket.blob(filename)
+        if not self.bucket:
+            logger.warning("No bucket available, returning local path")
+            return f"file://{local_path}"
         
-        blob.upload_from_string(audio_content, content_type="audio/mpeg")
-        
-        return f"https://storage.googleapis.com/{self.bucket_name}/{filename}"
+        try:
+            bucket = self.storage_client.bucket(self.bucket_name)
+            blob = bucket.blob(filename)
+            
+            blob.upload_from_string(audio_content, content_type="audio/mpeg")
+            logger.info("Uploaded audio to GCS", filename=filename)
+            
+            # Generate signed URL for private bucket access
+            signed_url = blob.generate_signed_url(
+                version="v4",
+                expiration=timedelta(hours=24),
+                method="GET"
+            )
+            return signed_url
+        except Exception as e:
+            logger.error("Failed to upload audio to GCS", error=str(e))
+            return f"https://storage.googleapis.com/{self.bucket_name}/{filename}"
 
 
 class VideoGenerator:
@@ -446,11 +483,6 @@ class VideoGenerator:
         Returns:
             GCS URL of the generated video
         """
-        # Return mock URL if no bucket available
-        if not self.bucket:
-            logger.warning("No bucket available, returning mock video URL")
-            return "https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4"
-        
         # Try to use Veo via Vertex API.
         if self.genai_client and genai_types:
             try:
@@ -493,17 +525,30 @@ class VideoGenerator:
                         # Vertex already persisted output to GCS.
                         parsed = _parse_gcs_uri(video.uri)
                         if parsed and self.storage_client:
-                            src_bucket, src_blob = parsed
+                            src_bucket_name, src_blob = parsed
                             try:
-                                blob = self.storage_client.bucket(src_bucket).blob(src_blob)
+                                src_bucket = self.storage_client.bucket(src_bucket_name)
+                                blob = src_bucket.blob(src_blob)
+                                
+                                # Save locally first
                                 local_path = str(Path(self.local_output_dir) / src_blob)
                                 Path(local_path).parent.mkdir(parents=True, exist_ok=True)
                                 await asyncio.to_thread(blob.download_to_filename, local_path)
                                 logger.info("Saved video locally", local_path=local_path)
+                                
+                                # Generate signed URL for private bucket access
+                                signed_url = await asyncio.to_thread(
+                                    blob.generate_signed_url,
+                                    version="v4",
+                                    expiration=timedelta(hours=24),
+                                    method="GET"
+                                )
+                                logger.info("Video generated and stored in GCS with signed URL", uri=video.uri)
+                                return signed_url
                             except Exception as save_err:
                                 logger.warning(f"Failed to save generated video locally: {save_err}")
                         logger.info("Video generated and stored in GCS", uri=video.uri)
-                        return _to_public_storage_url(video.uri)
+                        return _to_proxy_url(video.uri)
                     if video and getattr(video, "video_bytes", None):
                         filename = f"videos/{uuid.uuid4()}.mp4"
                         gcs_url = await self._upload_to_gcs(video.video_bytes, filename)
@@ -519,23 +564,38 @@ class VideoGenerator:
                     filtered_reasons=filtered_reasons,
                 )
             except Exception as e:
-                logger.warning(f"Veo generation failed: {e}")
+                logger.warning(f"Veo generation failed: {e}", exc_info=True)
         
-        # Fallback to mock URL
-        logger.warning("Returning mock video URL")
-        return "https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4"
+        # Fallback to a working sample video
+        logger.warning("Returning fallback video URL (Veo generation unavailable)")
+        return "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
     
     async def _upload_to_gcs(self, video_bytes: bytes, filename: str) -> str:
-        """Upload video bytes to Google Cloud Storage"""
+        """Upload video bytes to Google Cloud Storage and return signed URL"""
         local_path = _save_bytes_local(self.local_output_dir, filename, video_bytes)
         logger.info("Saved video locally", local_path=local_path)
 
-        bucket = self.storage_client.bucket(self.bucket_name)
-        blob = bucket.blob(filename)
+        if not self.storage_client:
+            logger.warning("No storage client available, returning local path")
+            return f"file://{local_path}"
         
-        blob.upload_from_string(video_bytes, content_type="video/mp4")
-        
-        return _to_public_storage_url(f"gs://{self.bucket_name}/{filename}")
+        try:
+            bucket = self.storage_client.bucket(self.bucket_name)
+            blob = bucket.blob(filename)
+            
+            blob.upload_from_string(video_bytes, content_type="video/mp4")
+            logger.info("Uploaded video to GCS", filename=filename)
+            
+            # Generate signed URL for private bucket access
+            signed_url = blob.generate_signed_url(
+                version="v4",
+                expiration=timedelta(hours=24),
+                method="GET"
+            )
+            return signed_url
+        except Exception as e:
+            logger.error("Failed to upload video to GCS", error=str(e))
+            return _to_proxy_url(f"gs://{self.bucket_name}/{filename}")
 
 
 class MediaEngine:
