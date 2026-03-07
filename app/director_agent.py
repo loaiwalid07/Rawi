@@ -66,7 +66,7 @@ class DirectorAgent:
         # Agent metadata
         self.name = "director_agent"
         self.description = "Orchestrates the storytelling pipeline"
-        self.model = "gemini-2.5-flash"
+        self.model = "gemini-3.1-flash-lite-preview"
         
         logger.info("Initialized DirectorAgent", project=project_id)
     
@@ -75,7 +75,7 @@ class DirectorAgent:
         topic: str,
         audience: str,
         metaphor: Optional[str] = None,
-        num_segments: int = 6
+        num_segments: int = 12
     ) -> Dict[str, Any]:
         """
         Plan a complete story by breaking it into segments.

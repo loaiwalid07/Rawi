@@ -3,6 +3,7 @@ Storyboard Agent - Generates detailed storyboard descriptions for Veo video gene
 """
 
 import os
+import json
 from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
 load_dotenv()
@@ -61,9 +62,8 @@ class StoryboardAgent:
         api_key = os.getenv("GEMINI_API_KEY")
         if api_key and GENAI_AVAILABLE:
             try:
-                genai.configure(api_key=api_key)
-                self.genai_client = genai
-                self.model_name = "gemini-2.0-flash"
+                self.genai_client = genai.Client(api_key=api_key)
+                self.model_name = "gemini-3.1-flash-lite-preview"
                 logger.info("Initialized StoryboardAgent with Google AI API", model=self.model_name)
                 return
             except Exception as e:
@@ -73,7 +73,7 @@ class StoryboardAgent:
         if VERTEXAI_AVAILABLE and GenerativeModel:
             try:
                 vertexai.init(project=project_id, location=location)
-                self.model = GenerativeModel("gemini-2.5-flash")
+                self.model = GenerativeModel("gemini-3.1-flash-lite-preview")
                 logger.info("Initialized StoryboardAgent with Vertex AI", project=project_id)
             except Exception as e:
                 logger.warning(f"Failed to initialize Vertex AI: {e}, using mock mode")
@@ -92,7 +92,8 @@ class StoryboardAgent:
         narration: str,
         segment_id: int,
         total_segments: int,
-        previous_frame: Optional[StoryboardFrame] = None
+        previous_frame: Optional[StoryboardFrame] = None,
+        visual_bible: Optional[Dict[str, Any]] = None
     ) -> StoryboardFrame:
         """
         Generate a detailed storyboard description for a story segment.
@@ -102,16 +103,21 @@ class StoryboardAgent:
             segment_id: Current segment number (1-based)
             total_segments: Total number of segments
             previous_frame: Previous storyboard frame for continuity
+            visual_bible: Optional dictionary containing visual consistency rules (characters, setting, palette)
             
         Returns:
             StoryboardFrame with detailed visual description
         """
         prompt = self._create_storyboard_prompt(
-            narration, segment_id, total_segments, previous_frame
+            narration, segment_id, total_segments, previous_frame, visual_bible
         )
         
-        response = await self.model.generate_content_async(prompt)
-        storyboard = self._parse_storyboard_response(response.text, segment_id)
+        if self.genai_client:
+            response = self.genai_client.models.generate_content(model=self.model_name, contents=prompt)
+            storyboard = self._parse_storyboard_response(response.text, segment_id)
+        else:
+            response = await self.model.generate_content_async(prompt)
+            storyboard = self._parse_storyboard_response(response.text, segment_id)
         
         logger.info(
             "Generated storyboard",
@@ -126,10 +132,23 @@ class StoryboardAgent:
         narration: str,
         segment_id: int,
         total_segments: int,
-        previous_frame: Optional[StoryboardFrame]
+        previous_frame: Optional[StoryboardFrame],
+        visual_bible: Optional[Dict[str, Any]] = None
     ) -> str:
         """Create prompt for storyboard generation"""
         
+        bible_section = ""
+        if visual_bible:
+            chars = json.dumps(visual_bible.get("characters", []), indent=2)
+            bible_section = f"""
+            # VISUAL BIBLE (CONSISTENCY RULES):
+            - Characters: {chars}
+            - Setting: {visual_bible.get('setting', 'Animation world')}
+            - Palette: {visual_bible.get('color_palette', 'Vibrant')}
+            
+            STRICTLY follow these descriptions for all characters.
+            """
+
         continuity_section = ""
         if previous_frame:
             continuity_section = f"""
@@ -141,30 +160,20 @@ class StoryboardAgent:
             """
         
         prompt = f"""
-        Create a detailed storyboard description for this story segment:
+        # TASK: HIGH-QUALITY CINEMATIC ANIMATION STORYBOARD
+        Create a detailed visual storyboard for this story segment to guide a high-end 3D animation model (Veo).
         
+        {bible_section}
+        
+        # STORY SEGMENT (Scene {segment_id}/{total_segments}):
         Narration: {narration}
-        Segment: {segment_id} of {total_segments}
         
-        {continuity_section}
-        
-        Provide the following details:
-        
-        1. Visual Prompt: A comprehensive description of what to show in the scene
-        2. Camera Angles: 2-3 specific camera angles (e.g., "wide shot showing the entire bakery", "close-up on the baker's hands")
-        3. Transitions: How to transition from the previous scene (e.g., "smooth fade", "quick cut", "zoom out")
-        4. Color Palette: Dominant colors and mood (e.g., "warm golden tones", "soft pastels", "vibrant and energetic")
-        5. Characters: Any characters to include and their expressions (e.g., "baker with warm smile", "curious child with wide eyes")
-        6. Key Actions: 2-3 main actions to animate (e.g., "kneading dough", "oven opening with steam", "customers entering")
-        
-        Guidelines:
-        - Keep it child-friendly and educational
-        - Create engaging, dynamic visuals
-        - Ensure smooth flow between segments
-        - Use warm, inviting colors
-        - Show, don't just tell
-        
-        Format your response as structured text that can be easily parsed.
+        # INSTRUCTIONS:
+        - Describe scenes for a high-end 3D animated film (Pixar/Disney style)
+        - Focus on expressive characters and vibrant environments
+        - Specify cinematic lighting (golden hour, magical glows, soft shadows)
+        - Define dynamic camera movements (slow zoom, pan, low-angle)
+        - Format your response as structured text for parsing.
         """
         
         return prompt
@@ -231,13 +240,15 @@ class StoryboardAgent:
     
     async def generate_complete_storyboard(
         self,
-        segments: List[Dict[str, Any]]
+        segments: List[Dict[str, Any]],
+        visual_bible: Optional[Dict[str, Any]] = None
     ) -> List[StoryboardFrame]:
         """
         Generate storyboard frames for all segments in a story.
         
         Args:
             segments: List of story segments with narration
+            visual_bible: Global consistency bible
             
         Returns:
             List of StoryboardFrame objects
@@ -250,7 +261,8 @@ class StoryboardAgent:
                 narration=segment.get("narration", ""),
                 segment_id=i,
                 total_segments=len(segments),
-                previous_frame=previous_frame
+                previous_frame=previous_frame,
+                visual_bible=visual_bible
             )
             
             storyboards.append(storyboard)

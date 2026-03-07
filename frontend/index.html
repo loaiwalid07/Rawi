@@ -9,11 +9,12 @@
 <body>
     <div class="container">
         <!-- Header -->
-        <header class="header">
-            <div class="logo">
-                <h1>📖 RAWI</h1>
-                <p class="tagline">The Storyteller</p>
+        <header class="glass-panel" style="padding: 2rem; margin-bottom: 2rem;">
+            <div class="logo-container">
+                <span class="logo-icon">✨</span>
+                <h1>RAWI</h1>
             </div>
+            <p>Magical stories for curious minds</p>
             <nav class="nav">
                 <a href="#" class="nav-link active">Create Story</a>
                 <a href="#" class="nav-link">My Stories</a>
@@ -22,9 +23,9 @@
         </header>
 
         <!-- Main Content -->
-        <main class="main">
+        <main class="main-content">
             <!-- Story Creation Form -->
-            <section class="story-form">
+            <section class="form-section glass-panel">
                 <h2>Create a New Story</h2>
                 <form id="storyForm">
                     <div class="form-group">
@@ -73,7 +74,7 @@
                         >
                     </div>
 
-                    <button type="submit" class="btn btn-primary" id="generateBtn">
+                    <button type="submit" class="btn-generate" id="generateBtn">
                         <span class="btn-text">Generate Story</span>
                         <span class="btn-loading" style="display: none;">
                             <span class="spinner"></span>
@@ -84,7 +85,7 @@
             </section>
 
             <!-- Story Player -->
-            <section class="story-player" id="storyPlayer" style="display: none;">
+            <section class="visual-section glass-panel" id="storyPlayer" style="display: none;">
                 <div class="player-header">
                     <h2 id="storyTitle">Story Title</h2>
                     <button class="btn btn-secondary" id="closeBtn">✕ Close</button>
@@ -105,7 +106,9 @@
 
                     <!-- Progress Bar -->
                     <div class="progress-container">
-                        <div class="progress-bar" id="progressBar"></div>
+                        <div class="progress-bar-wrapper">
+                            <div class="progress-bar" id="progressBar"></div>
+                        </div>
                         <div class="progress-time">
                             <span id="currentTime">0:00</span>
                             <span id="totalTime">0:00</span>

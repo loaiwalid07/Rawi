@@ -45,9 +45,8 @@ class StoryGenerator:
         api_key = os.getenv("GEMINI_API_KEY")
         if api_key and GENAI_AVAILABLE:
             try:
-                genai.configure(api_key=api_key)
-                self.genai_client = genai
-                self.model_name = "gemini-2.0-flash"
+                self.genai_client = genai.Client(api_key=api_key)
+                self.model_name = "gemini-3.1-flash-lite-preview"
                 logger.info("Initialized StoryGenerator with Google AI API", model=self.model_name)
                 return
             except Exception as e:
@@ -57,7 +56,7 @@ class StoryGenerator:
         if VERTEXAI_AVAILABLE and GenerativeModel:
             try:
                 vertexai.init(project=project_id, location=location)
-                self.model = GenerativeModel("gemini-2.5-flash")
+                self.model = GenerativeModel("gemini-3.1-flash-lite-preview")
                 logger.info("Initialized StoryGenerator with Vertex AI", project=project_id, location=location)
             except Exception as e:
                 logger.warning(f"Failed to initialize Vertex AI: {e}, using mock mode")
@@ -94,7 +93,7 @@ class StoryGenerator:
             
             # Use Google AI API if available
             if self.genai_client:
-                response = self.genai_client.GenerativeModel(self.model_name).generate_content(prompt)
+                response = self.genai_client.models.generate_content(model=self.model_name, contents=prompt)
                 story_plan = self._parse_story_plan(response.text, num_segments)
             else:
                 # Use Vertex AI
@@ -179,8 +178,12 @@ class StoryGenerator:
         - Length: 2-3 sentences
         """
         
-        response = await self.model.generate_content_async(prompt)
-        return response.text.strip()
+        if self.genai_client:
+            response = self.genai_client.models.generate_content(model=self.model_name, contents=prompt)
+            return response.text.strip()
+        else:
+            response = await self.model.generate_content_async(prompt)
+            return response.text.strip()
     
     def _create_story_plan_prompt(
         self,
@@ -199,6 +202,12 @@ class StoryGenerator:
         
         {metaphor_section}
         
+        # VISUAL CONSISTENCY (VERY IMPORTANT):
+        Define a "visual_bible" that ensures character and environment continuity. 
+        - Character Appearance: Specific details (hair color, clothing, unique features) that NEVER change.
+        - Environment: The primary setting's layout and color palette.
+        
+        # SEGMENTS:
         For each segment, provide:
         1. A brief title
         2. Engaging narration text (2-3 sentences)
@@ -206,9 +215,15 @@ class StoryGenerator:
         4. Emotional tone for narration
         5. How it transitions to next segment
         
+        # RESPONSE FORMAT:
         Structure the response as JSON:
         {{
           "title": "Story Title",
+          "visual_bible": {{
+            "characters": [{{ "name": "Name", "description": "CONSISTENT visual details" }}],
+            "setting": "Description of the main setting",
+            "color_palette": "Specific color theme"
+          }},
           "segments": [
             {{
               "id": 1,
@@ -219,10 +234,8 @@ class StoryGenerator:
               "transition": "fade to next scene"
             }}
           ],
-          "summary": "Brief summary of the story"
+          "summary": "Brief summary"
         }}
-        
-        Make it educational, engaging, and appropriate for the age group.
         """
         
         return prompt

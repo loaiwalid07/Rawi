@@ -114,7 +114,7 @@ class RawiApp {
 
     showPlayer(storyData) {
         const player = document.getElementById('storyPlayer');
-        const form = document.querySelector('.story-form');
+        const form = document.querySelector('.form-section');
 
         // Hide form, show player
         form.style.display = 'none';
@@ -310,7 +310,7 @@ class RawiApp {
 
     closePlayer() {
         const player = document.getElementById('storyPlayer');
-        const form = document.querySelector('.story-form');
+        const form = document.querySelector('.form-section');
 
         // Stop video
         const video = document.getElementById('storyVideo');

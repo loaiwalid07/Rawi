@@ -5,72 +5,116 @@ Main entry point for the RawiAgent using Google ADK
 
 import os
 import asyncio
+import uuid
+import json
+import collections
+import time
 from pathlib import Path
+from enum import Enum
+from typing import Optional, List, Dict, Any
+from dataclasses import dataclass
 
 # Load environment variables from .env file
 from dotenv import load_dotenv
 load_dotenv()
 
-from typing import Optional, List, Dict, Any
-from dataclasses import dataclass
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
+import structlog
 
-# Mock google.adk imports for development (replace with actual imports when available)
+# Mock google.adk imports for development
 try:
     from google.adk.agents import Agent
     from google.adk.tools import FunctionTool as Tool
     ADK_AVAILABLE = True
 except ImportError:
-    print("Warning: google-adk not installed, using mock classes")
     ADK_AVAILABLE = False
-    
     class Agent:
         def __init__(self, name: str = "", description: str = "", tools: list = None, model: str = ""):
-            self.name = name
-            self.description = description
-            self.tools = tools or []
-            self.model = model
-    
+            self.name, self.description, self.tools, self.model = name, description, tools or [], model
     class Tool:
-        """Mock tool class for development"""
         def __init__(self, name: str = "", description: str = "", func=None):
-            self.name = name
-            self.description = description
-            self.func = func
-        
-        def __call__(self, *args, **kwargs):
-            if self.func:
-                return self.func(*args, **kwargs)
-            return None
-    
+            self.name, self.description, self.func = name, description, func
+        def __call__(self, *args, **kwargs): return self.func(*args, **kwargs) if self.func else None
+
 class Context:
     def __init__(self, user_id, session_id):
-        self.user_id = user_id
-        self.session_id = session_id
+        self.user_id, self.session_id = user_id, session_id
 
 from app.director_agent import DirectorAgent
 from app.media_engine import MediaEngine, ImageGenerator, VoiceGenerator, VideoGenerator
 from app.storyboard_agent import StoryboardAgent
 from app.video_merger import VideoMerger
 from app.models.story_frame import StoryFrame, MediaAsset, MediaType, InterleavedSegment
-import structlog
 
 logger = structlog.get_logger(__name__)
 
+# --- Progress Tracking Models ---
+
+class TaskStatus(str, Enum):
+    PENDING = "pending"
+    PLANNING = "planning"
+    STORYBOARDING = "storyboarding"
+    GENERATING = "generating"
+    MERGING = "merging"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+@dataclass
+class TaskProgress:
+    task_id: str
+    status: TaskStatus
+    progress: int
+    message: str
+    result: Optional[Dict[str, Any]] = None
+    timestamp: float = time.time()
+
+class TaskStore:
+    """In-memory store for tracking generation tasks and their progress."""
+    def __init__(self):
+        self.tasks: Dict[str, TaskProgress] = {}
+        self.queues: Dict[str, asyncio.Queue] = collections.defaultdict(asyncio.Queue)
+
+    def update(self, task_id: str, status: TaskStatus, progress: int, message: str, result: Optional[Dict[str, Any]] = None):
+        t_progress = TaskProgress(
+            task_id=task_id, status=status, progress=progress, message=message, 
+            result=result, timestamp=time.time()
+        )
+        self.tasks[task_id] = t_progress
+        # Notify subscribers
+        if task_id in self.queues:
+            asyncio.create_task(self.queues[task_id].put(t_progress))
+
+    async def subscribe(self, task_id: str):
+        queue = self.queues[task_id]
+        # Send current state first if exists
+        if task_id in self.tasks:
+            yield f"data: {json.dumps(self.tasks[task_id].__dict__)}\n\n"
+        
+        while True:
+            item = await queue.get()
+            yield f"data: {json.dumps(item.__dict__)}\n\n"
+            if item.status in [TaskStatus.COMPLETED, TaskStatus.FAILED]:
+                break
+        
+        # Cleanup
+        del self.queues[task_id]
+
+task_store = TaskStore()
+
+# --- Agent Models ---
 
 @dataclass
 class StoryRequest:
     topic: str
-    audience: str = "general"
+    audience: str = "10-year-old"
     metaphor: Optional[str] = None
     duration_minutes: int = 5
     language: str = "en"
-
 
 @dataclass
 class StoryOutput:
@@ -81,436 +125,182 @@ class StoryOutput:
     voiceover_url: str
     interleaved_stream: List[InterleavedSegment]
 
-
 class RawiAgent:
-    """
-    Main RAWI agent that orchestrates storytelling using Google ADK.
-    Transforms educational topics into immersive multimodal stories.
-    """
-    
     def __init__(self, project_id: Optional[str] = None):
-        # Initialize configuration first
-        env_project = os.getenv("GOOGLE_CLOUD_PROJECT")
-        self._project_id = project_id or env_project
-        
-        if not self._project_id:
-            print("\n" + "="*60)
-            print("⚠️  WARNING: No Google Cloud project ID configured!")
-            print("="*60)
-            print("Please set GOOGLE_CLOUD_PROJECT in .env file or environment variable.")
-            print("Example: GOOGLE_CLOUD_PROJECT=your-project-id")
-            print("="*60 + "\n")
-        
+        self._project_id = project_id or os.getenv("GOOGLE_CLOUD_PROJECT", "demo")
         self._location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
-        self._mock_mode = not bool(self._project_id or env_project)
         
-        # Initialize media engines
-        self.image_gen = ImageGenerator(project_id=self._project_id or "demo")
-        self.voice_gen = VoiceGenerator(project_id=self._project_id or "demo")
-        self.video_gen = VideoGenerator(project_id=self._project_id or "demo")
-        self.video_merger = VideoMerger(project_id=self._project_id or "demo")
+        self.image_gen = ImageGenerator(project_id=self._project_id)
+        self.voice_gen = VoiceGenerator(project_id=self._project_id)
+        self.video_gen = VideoGenerator(project_id=self._project_id)
+        self.video_merger = VideoMerger(project_id=self._project_id)
         
-        # Initialize sub-agents
-        self.director = DirectorAgent(project_id=self._project_id or "demo")
-        self.storyboard_agent = StoryboardAgent(project_id=self._project_id or "demo")
-        self.media_engine = MediaEngine(project_id=self._project_id or "demo")
-        
-        # Define tools for ADK
-        self.tools = [
-            Tool(
-                # name="generate_storyboard",
-                # description="Generate storyboard images for story segments",
-                func=self._generate_storyboard_tool
-            ),
-            Tool(
-                # name="generate_video_segment",
-                # description="Generate video segment using Veo",
-                func=self._generate_video_segment_tool
-            ),
-            Tool(
-                # name="generate_voiceover",
-                # description="Generate emotive voiceover using Gemini TTS",
-                func=self._generate_voiceover_tool
-            ),
-            Tool(
-                # name="merge_videos",
-                # description="Merge multiple video segments into final video",
-                func=self._merge_videos_tool
-            )
-        ]
-        
-        # Agent metadata
-        self.name = "rawi_storyteller"
-        self.description = "Transforms educational topics into immersive multimodal stories"
-        self.model = "gemini-2.5-flash"
-        
-        logger.info("Initialized RawiAgent", project_id=self._project_id)
-    
-    @property
-    def project_id(self):
-        """Get project ID for backward compatibility"""
-        return self._project_id
-    
-    @property
-    def location(self):
-        """Get location for backward compatibility"""
-        return self._location
-    
-    async def tell_story(self, request: StoryRequest) -> StoryOutput:
-        """
-        Main method to generate a complete multimodal story.
-        
-        Args:
-            request: StoryRequest with topic, audience, metaphor, etc.
-            
-        Returns:
-            StoryOutput with all generated media assets
-        """
-        logger.info("Starting story generation", topic=request.topic, audience=request.audience)
-        
+        self.director = DirectorAgent(project_id=self._project_id)
+        self.storyboard_agent = StoryboardAgent(project_id=self._project_id)
+        self.media_engine = MediaEngine(project_id=self._project_id)
+
+    async def tell_story(self, request: StoryRequest, task_id: Optional[str] = None) -> StoryOutput:
         try:
-            # Phase 1: Generate story narrative and storyboard
+            if task_id: task_store.update(task_id, TaskStatus.PLANNING, 10, "Drafting a magical story script...")
+
             story_plan = await self.director.plan_story(
-                topic=request.topic,
-                audience=request.audience,
-                metaphor=request.metaphor
+                topic=request.topic, audience=request.audience, metaphor=request.metaphor
             )
             
-            logger.info("Story plan generated", num_segments=len(story_plan.get("segments", [])))
+            # Extract visual bible for consistency
+            visual_bible = story_plan.get("visual_bible", {})
             
-            # Phase 2: Generate storyboard frames
+            if task_id: task_store.update(task_id, TaskStatus.STORYBOARDING, 25, "Sketching character worlds and camera angles...")
+
             storyboard_frames = await self.storyboard_agent.generate_complete_storyboard(
-                segments=story_plan["segments"]
+                segments=story_plan["segments"],
+                visual_bible=visual_bible
             )
             
-            # Phase 3 & 4: Generate all media for segments
-            video_segments = []
-            all_storyboard_urls = []
-            all_voiceovers = []
-            interleaved_stream = []
+            if task_id: task_store.update(task_id, TaskStatus.GENERATING, 40, "Animating your story and bringing scenes to life...")
+
+            video_segments, all_storyboard_urls, all_voiceovers, interleaved_stream = [], [], [], []
             current_timestamp = 0.0
+            target_segment_duration = (request.duration_minutes * 60.0) / len(story_plan["segments"])
             
-            for i, (segment, storyboard) in enumerate(zip(story_plan["segments"], storyboard_frames)):
-                segment_id = segment.get("id", i + 1)
+            # Use counter to track parallel progress
+            completed_segments = 0
+            total_segments = len(story_plan["segments"])
+            
+            async def generate_segment_assets(i, segment, storyboard):
+                nonlocal completed_segments
+                segment["duration"] = target_segment_duration
                 
-                # Create image prompt from storyboard
-                image_prompt = f"""
-                Create an illustration for this story segment:
-                {segment['narration']}
+                # Use visual bible and storyboard details for high-quality prompting
+                image_prompt = f"High-quality 3D children's animation: {storyboard.visual_prompt}. Pixar-style character design."
+                video_prompt = f"Cinematic animation: {storyboard.visual_prompt}. Camera: {', '.join(storyboard.camera_angles)}."
                 
-                Visual style: Children's book illustration, warm and inviting, educational.
-                Scene: {storyboard.visual_prompt}
-                """
-                
-                # Create video prompt from storyboard
-                video_prompt = f"""
-                Create a short video (10-15 seconds) based on this illustration:
-                {storyboard.visual_prompt}
-                
-                Narration to match timing: {segment['narration']}
-                
-                Camera: {', '.join(storyboard.camera_angles)}
-                Style: Smooth animation, educational, child-friendly.
-                Colors: {storyboard.color_palette}
-                """
-                
-                # Generate all media
                 media_urls = await self.media_engine.generate_story_media(
                     image_prompt=image_prompt,
                     voiceover_text=segment['narration'],
                     video_prompt=video_prompt,
                     emotion=segment.get('emotion', 'warm'),
-                    language="auto"
+                    language=request.language
                 )
                 
-                # Add to collections
-                video_segments.append({
-                    "url": media_urls["video_url"],
-                    "segment_id": segment_id
-                })
-                all_storyboard_urls.append(media_urls["image_url"])
-                all_voiceovers.append(media_urls["voiceover_url"])
+                # Granular progress update
+                completed_segments += 1
+                if task_id:
+                    progress_val = 40 + int((completed_segments / total_segments) * 40)
+                    task_store.update(task_id, TaskStatus.GENERATING, progress_val, f"Successfully created {completed_segments} of {total_segments} animated scenes...")
                 
-                # Create interleaved segments
-                segment_duration = segment.get('duration', 15.0)
+                return {"segment": segment, "media_urls": media_urls, "id": i}
+
+            gen_tasks = [generate_segment_assets(i, seg, sb) for i, (seg, sb) in enumerate(zip(story_plan["segments"], storyboard_frames))]
+            generated_data = await asyncio.gather(*gen_tasks)
+            generated_data.sort(key=lambda x: x["id"])
+
+            if task_id: task_store.update(task_id, TaskStatus.MERGING, 85, "Final polishing and cinematic assembly...")
+
+            for data in generated_data:
+                seg, urls = data["segment"], data["media_urls"]
+                # Only include valid videos
+                if "/media/" in urls["video_url"] or "gs://" in urls["video_url"]:
+                    video_segments.append({"url": urls["video_url"], "segment_id": data["id"], "duration": seg["duration"]})
                 
-                # Narration segment
-                interleaved_stream.append(InterleavedSegment(
-                    type=MediaType.NARRATION,
-                    content=segment['narration'],
-                    timestamp=current_timestamp,
-                    duration=segment_duration,
-                    metadata={"emotion": segment.get('emotion', 'warm')}
-                ))
+                all_storyboard_urls.append(urls["image_url"])
+                all_voiceovers.append(urls["voiceover_url"])
                 
-                # Image segment (display with narration)
-                interleaved_stream.append(InterleavedSegment(
-                    type=MediaType.IMAGE_URL,
-                    content=media_urls["image_url"],
-                    timestamp=current_timestamp,
-                    duration=segment_duration,
-                    metadata={"style": "illustration", "segment_id": segment_id}
-                ))
-                
-                # Voiceover segment (play with narration)
-                interleaved_stream.append(InterleavedSegment(
-                    type=MediaType.VOICEOVER_BLOB,
-                    content=media_urls["voiceover_url"],
-                    timestamp=current_timestamp,
-                    duration=segment_duration,
-                    metadata={"format": "mp3", "segment_id": segment_id}
-                ))
-                
-                current_timestamp += segment_duration + 0.5  # Small gap between segments
-            
-            # Phase 5: Merge into final video
+                interleaved_stream.append(InterleavedSegment(MediaType.NARRATION, seg['narration'], current_timestamp, seg["duration"], {}))
+                interleaved_stream.append(InterleavedSegment(MediaType.IMAGE_URL, urls["image_url"], current_timestamp, seg["duration"], {}))
+                interleaved_stream.append(InterleavedSegment(MediaType.VOICEOVER_BLOB, urls["voiceover_url"], current_timestamp, seg["duration"], {}))
+                current_timestamp += seg["duration"] + 0.5
+
+            if len(video_segments) < (total_segments / 2):
+                logger.warning("Too many video segments failed", count=len(video_segments))
+                if task_id: task_store.update(task_id, TaskStatus.FAILED, 0, "Production halted: Most video segments failed to animate.")
+                raise RuntimeError("Failed to generate enough video segments")
+
             final_video_url = await self.video_merger.merge_segments(
                 video_segments=video_segments,
-                output_filename=f"story_{request.topic.replace(' ', '_').replace('/', '_')}.mp4"
+                output_filename=f"story_{uuid.uuid4().hex[:8]}.mp4"
             )
             
-            # Create story frames
-            frames = self.director.create_story_frames(story_plan)
-            
-            # Create output
             output = StoryOutput(
-                frames=frames,
+                frames=self.director.create_story_frames(story_plan),
                 video_url=final_video_url,
                 storyboard_urls=all_storyboard_urls,
-                narration_text=story_plan.get("summary", ""),
+                narration_text=" ".join([s["narration"] for s in story_plan["segments"]]),
                 voiceover_url=all_voiceovers[0] if all_voiceovers else "",
                 interleaved_stream=interleaved_stream
             )
-            
-            logger.info("Story generation completed", video_url=final_video_url)
+
+            if task_id:
+                result = {
+                    "video_url": output.video_url,
+                    "narration_text": output.narration_text,
+                    "interleaved_stream": [seg.__dict__ for seg in output.interleaved_stream]
+                }
+                task_store.update(task_id, TaskStatus.COMPLETED, 100, "Your story is ready for the premiere!", result=result)
             return output
             
         except Exception as e:
             logger.error("Story generation failed", error=str(e))
-            raise
-    
-    # Tool implementations for ADK
-    async def _generate_storyboard_tool(
-        self, 
-        context: Context, 
-        narration: str
-    ) -> Dict[str, Any]:
-        """ADK tool: Generate storyboard image from narration"""
-        image_prompt = f"""
-        Create an illustration for this educational story segment:
-        {narration}
-        
-        Style: Children's book illustration, warm and inviting, educational.
-        Format: 16:9 aspect ratio.
-        """
-        
-        image_url = await self.image_gen.generate(
-            prompt=image_prompt,
-            style="illustration"
-        )
-        
-        return {"image_url": image_url, "prompt": image_prompt}
-    
-    async def _generate_video_segment_tool(
-        self,
-        context: Context,
-        storyboard_prompt: str,
-        narration: str
-    ) -> Dict[str, Any]:
-        """ADK tool: Generate video segment using Veo"""
-        video_prompt = f"""
-        Create a short video (10-15 seconds) that illustrates:
-        {storyboard_prompt}
-        
-        Narration to match timing: {narration}
-        
-        Style: Smooth animation, educational, child-friendly.
-        """
-        
-        video_url = await self.video_gen.generate(
-            prompt=video_prompt,
-            duration=15
-        )
-        
-        return {"video_url": video_url, "prompt": video_prompt}
-    
-    async def _generate_voiceover_tool(
-        self,
-        context: Context,
-        text: str,
-        emotion: str = "warm"
-    ) -> Dict[str, Any]:
-        """ADK tool: Generate emotive voiceover"""
-        voiceover_url = await self.voice_gen.generate(
-            text=text,
-            voice="male",
-            emotion=emotion,
-            language="auto"
-        )
-        
-        return {"audio_url": voiceover_url, "text": text, "emotion": emotion}
-    
-    async def _merge_videos_tool(
-        self,
-        context: Context,
-        video_urls: List[str]
-    ) -> Dict[str, str]:
-        """ADK tool: Merge video segments"""
-        merged_url = await self.video_merger.merge_segments(
-            video_segments=[{"url": url} for url in video_urls],
-            output_filename="final_story.mp4"
-        )
-        
-        return {"merged_video_url": merged_url}
+            if task_id: task_store.update(task_id, TaskStatus.FAILED, 0, f"Production Error: {str(e)}")
+            raise e
 
+# --- FastAPI App ---
 
-# FastAPI app for deployment
-app = FastAPI(
-    title="RAWI - The Storyteller",
-    description="Transforms educational topics into immersive multimodal stories",
-    version="1.0.0"
-)
+app = FastAPI(title="RAWI - The Storyteller")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+_rawi_agent = None
 
-# Get the base directory
-BASE_DIR = Path(__file__).parent
-FRONTEND_DIR = BASE_DIR / "frontend"
-
-# Mount static files if frontend directory exists
-if FRONTEND_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
-
-
-@app.get("/", response_class=HTMLResponse)
-async def serve_frontend():
-    """Serve the main frontend page"""
-    index_file = FRONTEND_DIR / "index.html"
-    
-    if index_file.exists():
-        return FileResponse(str(index_file))
-    
-    return HTMLResponse(
-        content="""
-        <html>
-            <head><title>RAWI - The Storyteller</title></head>
-            <body>
-                <h1>RAWI - The Storyteller</h1>
-                <p>API is running. Frontend not found.</p>
-                <p>API Endpoints:</p>
-                <ul>
-                    <li>POST /tell-story - Generate a story</li>
-                    <li>GET /health - Health check</li>
-                    <li>GET /docs - API documentation</li>
-                </ul>
-            </body>
-        </html>
-        """,
-        status_code=200
-    )
-
-
-@app.get("/ui")
-async def serve_ui():
-    """Alias endpoint for serving the frontend"""
-    return await serve_frontend()
-
-
-class StoryRequestAPI(BaseModel):
-    topic: str
-    audience: str = "general"
-    metaphor: Optional[str] = None
-    duration_minutes: int = 5
-    language: str = "en"
-
-
-class StoryResponseAPI(BaseModel):
-    video_url: str
-    storyboard_urls: List[str]
-    narration_text: str
-    voiceover_url: str
-    segments: List[Dict[str, Any]]
-    interleaved_stream: List[Dict[str, Any]]
-
-
-# Initialize agent globally
-rawi_agent = RawiAgent()
-
-
-@app.get("/")
-async def root():
-    """Root endpoint"""
-    return {
-        "name": "RAWI - The Storyteller",
-        "version": "1.0.0",
-        "status": "running"
-    }
-
+def get_agent():
+    global _rawi_agent
+    if _rawi_agent is None:
+        _rawi_agent = RawiAgent()
+    return _rawi_agent
 
 @app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy", "agent": "rawi_storyteller"}
+async def health(): return {"status": "healthy"}
 
-
-@app.post("/tell-story", response_model=StoryResponseAPI)
-async def tell_story_endpoint(request: StoryRequestAPI):
-    """
-    Generate a multimodal story for the given topic.
+@app.post("/tell-story")
+async def tell_story_endpoint(request: Dict[str, Any]):
+    task_id = str(uuid.uuid4())
+    task_store.update(task_id, TaskStatus.PENDING, 0, "Initializing...")
     
-    Example:
-        POST /tell-story
-        {
-            "topic": "French Revolution",
-            "audience": "10-year-old",
-            "metaphor": "a bakery"
-        }
-    """
+    async def run_gen():
+        try:
+            agent = get_agent()
+            req = StoryRequest(
+                topic=request.get("topic", "A magical adventure"),
+                audience=request.get("audience", "10-year-old"),
+                metaphor=request.get("metaphor"),
+                duration_minutes=int(request.get("duration_minutes", 5))
+            )
+            await agent.tell_story(req, task_id=task_id)
+        except Exception as e: logger.error(f"Task {task_id} failed: {e}")
+
+    asyncio.create_task(run_gen())
+    return {"task_id": task_id}
+
+@app.get("/stream-progress/{task_id}")
+async def stream_progress(task_id: str):
+    return StreamingResponse(task_store.subscribe(task_id), media_type="text/event-stream")
+
+@app.get("/video/{bucket}/{path:path}")
+@app.get("/media/{bucket}/{path:path}")
+async def proxy_media(bucket: str, path: str):
+    from google.cloud import storage
     try:
-        logger.info("Received story request", topic=request.topic)
-        
-        story_request = StoryRequest(**request.dict())
-        story_output = await rawi_agent.tell_story(story_request)
-        
-        response = StoryResponseAPI(
-            video_url=story_output.video_url,
-            storyboard_urls=story_output.storyboard_urls,
-            narration_text=story_output.narration_text,
-            voiceover_url=story_output.voiceover_url,
-            segments=[frame.__dict__ for frame in story_output.frames],
-            interleaved_stream=[seg.__dict__ for seg in story_output.interleaved_stream]
-        )
-        
-        logger.info("Story generated successfully", video_url=story_output.video_url)
-        return response
-        
-    except Exception as e:
-        logger.error("Story generation failed", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        agent = get_agent()
+        blob = storage.Client(project=agent._project_id).bucket(bucket).blob(path)
+        content = await asyncio.to_thread(blob.download_as_bytes)
+        ext = path.split('.')[-1].lower()
+        m_types = {"mp4": "video/mp4", "mp3": "audio/mpeg", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}
+        return StreamingResponse(iter([content]), media_type=m_types.get(ext, "application/octet-stream"))
+    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
-
-@app.get("/docs")
-async def docs():
-    """Redirect to API documentation"""
-    return {"docs": "/docs", "redoc": "/redoc"}
-
+# Static files (must be defined last)
+FRONTEND_DIR = Path(__file__).parent / "frontend-react" / "dist"
+if FRONTEND_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="static")
 
 if __name__ == "__main__":
-    port = int(os.getenv("API_PORT", 8000))
-    host = os.getenv("API_HOST", "0.0.0.0")
-    
-    logger.info("Starting RAWI server", host=host, port=port)
-    
-    uvicorn.run(
-        "main:app",
-        host=host,
-        port=port,
-        reload=True,
-        log_level="info"
-    )
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), reload=True)
