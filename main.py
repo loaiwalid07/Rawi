@@ -164,11 +164,16 @@ class RawiAgent:
 
             video_segments, all_storyboard_urls, all_voiceovers, interleaved_stream = [], [], [], []
             current_timestamp = 0.0
-            target_segment_duration = (request.duration_minutes * 60.0) / len(story_plan["segments"])
+            
+            # Optimize segment duration: cap at 12 seconds to reduce total segments
+            # 3 min video = 180s / 12s = 15 segments (vs 20+ at 8s default)
+            num_segments = len(story_plan["segments"])
+            calculated_duration = (request.duration_minutes * 60.0) / num_segments
+            target_segment_duration = min(12.0, calculated_duration)
             
             # Use counter to track parallel progress
             completed_segments = 0
-            total_segments = len(story_plan["segments"])
+            total_segments = num_segments
             
             async def generate_segment_assets(i, segment, storyboard):
                 nonlocal completed_segments
