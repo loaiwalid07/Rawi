@@ -351,14 +351,16 @@ class VideoGenerator:
                 logger.warning(f"Failed to initialize Veo client: {e}")
     
     # Class-level semaphore to limit concurrent Veo calls project-wide
-    _semaphore = asyncio.Semaphore(2)
+    # Increased to 3 for better throughput while respecting rate limits
+    _semaphore = asyncio.Semaphore(3)
+    _rate_limit_backoff = 60  # Base backoff in seconds
 
     async def generate(self, prompt: str, duration: int = 15, resolution: str = "1080p", image_url: Optional[str] = None) -> str:
         if not self.genai_client or not genai_types:
             return "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
 
         max_retries = 3
-        backoff = 30
+        base_backoff = 30
         
         for attempt in range(max_retries):
             try:
@@ -435,7 +437,7 @@ class VideoGenerator:
             except Exception as e:
                 error_str = str(e).lower()
                 if ("429" in error_str or "quota" in error_str or "rate limit" in error_str) and attempt < max_retries - 1:
-                    wait_time = backoff * (attempt + 1)
+                    wait_time = base_backoff * (attempt + 1)
                     logger.warning(f"Veo rate limited (attempt {attempt+1}), retrying in {wait_time}s...", error=str(e))
                     await asyncio.sleep(wait_time)
                 else:
