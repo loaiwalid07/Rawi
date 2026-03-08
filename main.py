@@ -50,6 +50,9 @@ from app.media_engine import MediaEngine, ImageGenerator, VoiceGenerator, VideoG
 from app.storyboard_agent import StoryboardAgent
 from app.video_merger import VideoMerger
 from app.models.story_frame import StoryFrame, MediaAsset, MediaType, InterleavedSegment
+from app.context_store import context_store
+from app.chat_service import get_chat_service
+from app.models.story_context import StoryContext
 
 logger = structlog.get_logger(__name__)
 
@@ -230,6 +233,20 @@ class RawiAgent:
                 interleaved_stream=interleaved_stream
             )
 
+            # Store story context for chat feature
+            if task_id:
+                story_context = StoryContext(
+                    story_id=task_id,
+                    topic=request.topic,
+                    audience=request.audience,
+                    metaphor=request.metaphor,
+                    visual_bible=visual_bible,
+                    segments=[seg.__dict__ for seg in output.interleaved_stream],
+                    full_transcript=output.narration_text,
+                    created_at=time.time()
+                )
+                context_store.store(task_id, story_context)
+
             if task_id:
                 result = {
                     "video_url": output.video_url,
@@ -296,6 +313,67 @@ async def proxy_media(bucket: str, path: str):
         m_types = {"mp4": "video/mp4", "mp3": "audio/mpeg", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}
         return StreamingResponse(iter([content]), media_type=m_types.get(ext, "application/octet-stream"))
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Chat Endpoints ---
+
+from fastapi import Request
+
+@app.post("/chat/{story_id}")
+async def chat_endpoint(story_id: str, request: Request):
+    """Send message to chat about story."""
+    body = await request.json()
+    message = body.get("message", "")
+    
+    context = context_store.get(story_id)
+    if not context:
+        raise HTTPException(status_code=404, detail="Story not found or expired")
+    
+    if not message:
+        raise HTTPException(status_code=400, detail="Message is required")
+    
+    chat_service = get_chat_service()
+    context_store.add_message(story_id, "user", message)
+    
+    async def generate():
+        full_response = ""
+        async for chunk in chat_service.chat(
+            message, 
+            context, 
+            context_store.get_history(story_id)
+        ):
+            full_response += chunk
+            yield f"data: {json.dumps({'text': chunk})}\n\n"
+        
+        context_store.add_message(story_id, "assistant", full_response)
+    
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@app.get("/story/{story_id}/context")
+async def get_story_context(story_id: str):
+    """Get story context for frontend."""
+    context = context_store.get(story_id)
+    if not context:
+        raise HTTPException(status_code=404, detail="Story not found or expired")
+    
+    return {
+        "story_id": context.story_id,
+        "topic": context.topic,
+        "transcript": context.full_transcript,
+        "segments": context.segments,
+        "visual_bible": context.visual_bible,
+        "audience": context.audience,
+        "metaphor": context.metaphor
+    }
+
+
+@app.get("/story/{story_id}/history")
+async def get_conversation_history(story_id: str):
+    """Get conversation history for a story."""
+    history = context_store.get_history(story_id)
+    return {"history": history}
+
 
 # Static files (must be defined last)
 FRONTEND_DIR = Path(__file__).parent / "frontend-react" / "dist"
