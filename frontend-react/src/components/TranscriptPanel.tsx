@@ -1,4 +1,3 @@
-// frontend-react/src/components/TranscriptPanel.tsx
 import React, { useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -15,23 +14,13 @@ interface TranscriptPanelProps {
   onSegmentClick?: (time: number) => void;
 }
 
-const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
-  segments,
-  currentTime,
-  onSegmentClick
-}) => {
+export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({ segments, currentTime, onSegmentClick }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  
-  // Filter to only narration segments
-  const narrationSegments = segments.filter(seg => 
-    seg.type === 'NARRATION' || seg.type === 'NARRATION_BLOB'
-  );
 
   // Find active segment based on current time
-  const activeIndex = narrationSegments.findIndex((seg, i) => {
-    const nextSeg = narrationSegments[i + 1];
-    return currentTime >= seg.timestamp && (!nextSeg || currentTime < nextSeg.timestamp);
-  });
+  const activeIndex = segments.findIndex(
+    (seg) => currentTime >= seg.timestamp && currentTime < seg.timestamp + seg.duration
+  );
 
   // Auto-scroll to active segment
   useEffect(() => {
@@ -45,65 +34,56 @@ const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex items-center gap-2 mb-4">
-        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-        <h3 className="text-indigo-400 font-semibold">Transcript</h3>
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-4 pb-2 border-b border-slate-700/50">
+        <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+        <h3 className="text-sm font-medium text-slate-300">Transcript</h3>
       </div>
       
+      {/* Content */}
       <div 
         ref={containerRef}
-        className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent"
+        className="flex-1 overflow-y-auto space-y-2 pr-2 scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-transparent scrollbar-rounded"
       >
-        <AnimatePresence>
-          {narrationSegments.map((seg, i) => {
-            const isActive = i === activeIndex;
-            return (
-              <motion.div
-                key={i}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.05 }}
-                className={`
-                  p-4 rounded-xl cursor-pointer transition-all duration-300
-                  ${isActive 
-                    ? 'bg-indigo-500/20 border border-indigo-500/50 shadow-lg shadow-indigo-500/10' 
-                    : 'bg-white/5 hover:bg-white/10 border border-transparent'
-                  }
-                `}
-                onClick={() => onSegmentClick?.(seg.timestamp)}
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xs font-mono text-white/40">
-                    {formatTime(seg.timestamp)}
-                  </span>
-                  {isActive && (
-                    <span className="text-xs bg-indigo-500/30 text-indigo-300 px-2 py-0.5 rounded-full">
-                      Now Playing
-                    </span>
-                  )}
-                </div>
-                <p className={`text-white/80 leading-relaxed ${isActive ? 'text-base' : 'text-sm'}`}>
-                  {seg.content}
-                </p>
-              </motion.div>
-            );
-          })}
-        </AnimatePresence>
-        
-        {narrationSegments.length === 0 && (
-          <div className="text-white/40 text-center py-8">
-            <p>No transcript available</p>
+        {segments.length === 0 ? (
+          <div className="text-center py-8 text-slate-500 text-sm">
+            No transcript available
           </div>
+        ) : (
+          <AnimatePresence>
+            {segments.map((seg, i) => {
+              const isActive = i === activeIndex;
+              return (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.03 }}
+                  onClick={() => onSegmentClick?.(seg.timestamp)}
+                  className={`
+                    p-3 rounded-lg cursor-pointer transition-all duration-200
+                    ${isActive 
+                      ? 'bg-blue-500/10 border border-blue-500/50' 
+                      : 'hover:bg-slate-800/50 border border-transparent'
+                    }
+                  `}
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="text-xs text-slate-500 font-mono mt-1">
+                      {Math.floor(seg.timestamp / 60)}:{Math.floor(seg.timestamp % 60).toString().padStart(2, '0')}
+                    </span>
+                    <p className="text-sm leading-relaxed text-slate-300 whitespace-pre-wrap">
+                      {seg.content}
+                    </p>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </AnimatePresence>
         )}
       </div>
     </div>
   );
 };
-
-function formatTime(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-}
 
 export default TranscriptPanel;
