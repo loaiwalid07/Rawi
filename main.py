@@ -153,12 +153,26 @@ class RawiAgent:
             # Extract visual bible for consistency
             visual_bible = story_plan.get("visual_bible", {})
             
-            if task_id: task_store.update(task_id, TaskStatus.STORYBOARDING, 25, "Sketching character worlds and camera angles...")
-
-            storyboard_frames = await self.storyboard_agent.generate_complete_storyboard(
-                segments=story_plan["segments"],
-                visual_bible=visual_bible
-            )
+            # Storyboarding with granular progress
+            total_segs = len(story_plan["segments"])
+            storyboard_frames = []
+            
+            for i, segment in enumerate(story_plan["segments"], start=1):
+                if task_id:
+                    progress = 15 + int((i / total_segs) * 20)  # 15-35%
+                    task_store.update(
+                        task_id, TaskStatus.STORYBOARDING, progress,
+                        f"Sketching scene {i}/{total_segs}: {segment.get('narration', '')[:40]}..."
+                    )
+                
+                storyboard = await self.storyboard_agent.generate_storyboard(
+                    narration=segment.get("narration", ""),
+                    segment_id=i,
+                    total_segments=total_segs,
+                    previous_frame=storyboard_frames[-1] if storyboard_frames else None,
+                    visual_bible=visual_bible
+                )
+                storyboard_frames.append(storyboard)
             
             if task_id: task_store.update(task_id, TaskStatus.GENERATING, 40, "Animating your story and bringing scenes to life...")
 

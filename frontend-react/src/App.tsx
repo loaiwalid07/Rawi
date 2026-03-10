@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
-import { Send, RotateCcw, AlertCircle, MessageCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Send, RotateCcw, AlertCircle, MessageCircle, FileText, Home, Video, Sparkles } from 'lucide-react';
 import axios from 'axios';
 import VideoPlayer from './components/VideoPlayer';
 import TranscriptPanel from './components/TranscriptPanel';
@@ -30,14 +30,17 @@ interface Segment {
   duration: number;
 }
 
+type TabType = 'transcript' | 'chat';
+
 const App: React.FC = () => {
   const [topic, setTopic] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [status, setStatus] = useState<ProgressUpdate | null>(null);
   const [videoResult, setVideoResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
-  const [chatOpen, setChatOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabType>('transcript');
   const [currentTime, setCurrentTime] = useState(0);
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
 
   const subscribeToTask = (taskId: string) => {
     const eventSource = new EventSource(`${API_BASE}/stream-progress/${taskId}`);
@@ -87,7 +90,6 @@ const App: React.FC = () => {
 
   const handleSegmentClick = (time: number) => {
     setCurrentTime(time);
-    // Find and update video time if needed
     const video = document.querySelector('video');
     if (video) {
       video.currentTime = time;
@@ -98,172 +100,311 @@ const App: React.FC = () => {
     setVideoResult(null);
     setTopic('');
     setStatus(null);
-    setChatOpen(false);
     setCurrentTime(0);
+    setActiveTab('transcript');
   };
 
-  // Parse segments from result
   const segments: Segment[] = videoResult?.interleaved_stream || [];
 
-  return (
-    <div className="min-h-screen bg-[#050510] text-white flex flex-col">
-      {/* Background Effects */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-purple-600/20 blur-[120px] rounded-full animate-pulse" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-indigo-600/20 blur-[120px] rounded-full animate-pulse [animation-delay:2s]" />
-      </div>
+  const getStatusColor = (s: TaskStatus) => {
+    switch (s) {
+      case 'completed': return 'bg-emerald-500';
+      case 'failed': return 'bg-red-500';
+      case 'generating': return 'bg-blue-500';
+      case 'storyboarding': return 'bg-violet-500';
+      case 'planning': return 'bg-amber-500';
+      default: return 'bg-slate-500';
+    }
+  };
 
-      <div className="relative z-10 flex-1 flex flex-col">
+  return (
+    <div className="h-screen bg-slate-950 text-slate-100 flex overflow-hidden">
+      {/* Sidebar */}
+      <aside className="w-16 bg-slate-900 border-r border-slate-800 flex flex-col items-center py-4 gap-2 flex-shrink-0">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center mb-4">
+          <Video size={20} className="text-white" />
+        </div>
+        
+        <button className="w-10 h-10 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-all flex items-center justify-center">
+          <Home size={20} />
+        </button>
+        
+        <button className="w-10 h-10 rounded-lg text-slate-500 hover:bg-slate-800 hover:text-slate-300 transition-all flex items-center justify-center">
+          <FileText size={20} />
+        </button>
+        
+        <div className="flex-1" />
+        
+        <div className="text-[10px] text-slate-600 font-mono">v1.3</div>
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* Header */}
-        <header className="p-6 flex justify-between items-center">
-          <h1 className="text-2xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-indigo-200 to-indigo-400">
-            RAWI <span className="text-indigo-500">Storyteller</span>
-          </h1>
+        <header className="h-14 border-b border-slate-800 flex items-center justify-between px-6 bg-slate-900/50 flex-shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <h1 className="text-lg font-semibold text-white flex-shrink-0">
+              RAWI <span className="text-blue-400 font-normal">Studio</span>
+            </h1>
+            {videoResult && (
+              <span className="text-xs text-slate-500 bg-slate-800 px-2 py-1 rounded truncate max-w-xs">
+                {topic}
+              </span>
+            )}
+          </div>
           
           {videoResult && (
             <button
-              onClick={() => setChatOpen(true)}
-              className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-xl transition-all"
+              onClick={resetApp}
+              className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors flex-shrink-0"
             >
-              <MessageCircle size={18} className="text-indigo-400" />
-              <span className="text-sm">Ask about this story</span>
+              <RotateCcw size={16} />
+              <span>New Story</span>
             </button>
           )}
         </header>
 
-        {/* Main Content */}
-        <main className="flex-1 flex items-center justify-center p-6">
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="w-full max-w-6xl"
-          >
-            {/* Input View */}
-            {!isGenerating && !videoResult && (
-              <div className="max-w-2xl mx-auto text-center space-y-8">
-                <header className="space-y-2">
-                  <h2 className="text-4xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-indigo-200 to-indigo-400">
-                    Transform Any Topic Into a Story
-                  </h2>
-                  <p className="text-indigo-300/60">Enter a topic and watch it become an engaging educational video</p>
-                </header>
-
-                <form onSubmit={handleGenerate} className="relative group">
-                  <input
-                    type="text"
-                    value={topic}
-                    onChange={(e) => setTopic(e.target.value)}
-                    placeholder="What should we learn about today?"
-                    className="w-full bg-white/5 border border-white/10 p-6 rounded-2xl text-xl outline-none focus:border-indigo-500/50 backdrop-blur-xl transition-all placeholder:text-white/20 group-hover:bg-white/10 pr-16"
-                  />
-                  <button 
-                    type="submit"
-                    disabled={!topic.trim()}
-                    className="absolute right-3 top-3 bottom-3 aspect-square rounded-xl bg-indigo-600 text-white flex items-center justify-center hover:bg-indigo-500 disabled:opacity-50 transition-colors"
-                  >
-                    <Send size={24} />
-                  </button>
-                </form>
-              </div>
-            )}
-
-            {/* Generating View */}
-            {isGenerating && status && (
-              <div className="flex flex-col items-center space-y-12">
-                <div className="relative w-48 h-48 flex items-center justify-center">
-                  <motion.div 
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-                    className="absolute inset-0 border-t-2 border-indigo-500/50 rounded-full"
-                  />
-                  <motion.div 
-                    animate={{ scale: [1, 1.1, 1] }}
-                    transition={{ duration: 4, repeat: Infinity }}
-                    className="w-32 h-32 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full blur-[20px] opacity-40"
-                  />
-                  <div className="text-4xl font-bold">{status.progress}%</div>
-                </div>
-                
-                <div className="text-center space-y-2">
-                  <div className="text-indigo-400 font-mono text-sm tracking-widest uppercase">
-                    {status.status.replace('_', ' ')}
+        {/* Content Area */}
+        <div className="flex-1 flex overflow-hidden min-h-0">
+          {/* Left: Video Section */}
+          <div className="flex-1 flex flex-col p-6 overflow-hidden min-w-0">
+            <AnimatePresence mode="wait">
+              {/* Input State */}
+              {!isGenerating && !videoResult && (
+                <motion.div
+                  key="input"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  className="flex-1 flex flex-col items-center justify-center"
+                >
+                  <div className="text-center mb-8">
+                    <h2 className="text-3xl font-bold text-white mb-2">
+                      Transform Any Topic Into a Story
+                    </h2>
+                    <p className="text-slate-400">
+                      Enter a topic and watch it become an engaging educational video
+                    </p>
                   </div>
-                  <h2 className="text-2xl font-light text-white/90 italic">"{status.message}"</h2>
-                </div>
 
-                <div className="w-full max-w-md bg-white/5 h-1 rounded-full overflow-hidden">
-                  <motion.div 
-                    className="h-full bg-gradient-to-r from-indigo-500 to-purple-500"
-                    initial={{ width: 0 }}
-                    animate={{ width: `${status.progress}%` }}
-                  />
-                </div>
-              </div>
-            )}
+                  <form onSubmit={handleGenerate} className="w-full max-w-xl">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={topic}
+                        onChange={(e) => setTopic(e.target.value)}
+                        placeholder="What should we learn about today?"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-5 py-4 text-lg text-white placeholder:text-slate-500 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all pr-14"
+                      />
+                      <button 
+                        type="submit"
+                        disabled={!topic.trim()}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-lg bg-blue-500 text-white flex items-center justify-center hover:bg-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                      >
+                        <Send size={20} />
+                      </button>
+                    </div>
+                  </form>
+                </motion.div>
+              )}
 
-            {/* Output View */}
-            {videoResult && (
-              <motion.div 
-                initial={{ scale: 0.95, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                className="grid grid-cols-1 lg:grid-cols-2 gap-6"
-              >
-                {/* Video Section */}
-                <div className="space-y-4">
-                  <VideoPlayer 
-                    videoUrl={`${API_BASE}${videoResult.video_url}`}
-                    segments={segments}
-                  />
+              {/* Generating State */}
+              {isGenerating && status && (
+                <motion.div
+                  key="generating"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="flex-1 flex flex-col items-center justify-center"
+                >
+                  <div className="w-32 h-32 relative mb-8">
+                    <motion.div 
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
+                      className="absolute inset-0 border-2 border-t-blue-500 border-slate-700 rounded-full"
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-3xl font-bold text-white">{status.progress}%</span>
+                    </div>
+                  </div>
                   
-                  <div className="flex justify-between items-center">
-                    <button 
-                      onClick={resetApp}
-                      className="flex items-center gap-2 text-indigo-300 hover:text-white transition-colors"
-                    >
-                      <RotateCcw size={18} /> Create another story
-                    </button>
+                  <div className="text-center max-w-md">
+                    <div className="flex items-center justify-center gap-2 mb-2">
+                      <span className={`w-2 h-2 rounded-full ${getStatusColor(status.status)} animate-pulse`} />
+                      <span className="text-sm font-medium text-slate-400 uppercase tracking-wider">
+                        {status.status.replace('_', ' ')}
+                      </span>
+                    </div>
+                    <p className="text-lg text-slate-300">{status.message}</p>
                   </div>
-                </div>
 
-                {/* Transcript Section */}
-                <div className="h-[500px] lg:h-auto p-6 rounded-3xl bg-white/5 backdrop-blur-3xl border border-white/10">
-                  <TranscriptPanel 
-                    segments={segments}
-                    currentTime={currentTime}
-                    onSegmentClick={handleSegmentClick}
-                  />
-                </div>
-              </motion.div>
-            )}
+                  <div className="w-full max-w-sm mt-8">
+                    <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                      <motion.div 
+                        className="h-full bg-blue-500"
+                        initial={{ width: 0 }}
+                        animate={{ width: `${status.progress}%` }}
+                        transition={{ duration: 0.3 }}
+                      />
+                    </div>
+                  </div>
+                </motion.div>
+              )}
 
-            {/* Error View */}
+              {/* Video Result State */}
+              {videoResult && (
+                <motion.div
+                  key="video"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="flex-1 flex flex-col min-h-0"
+                >
+                  {/* Video Player */}
+                  <div className="flex-1 min-h-0 mb-4">
+                    <VideoPlayer 
+                      videoUrl={`${API_BASE}${videoResult.video_url}`}
+                      segments={segments}
+                      onTimeUpdate={setCurrentTime}
+                    />
+                  </div>
+                  
+                  {/* Video Info Bar */}
+                  <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 flex-shrink-0">
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-medium text-white mb-1 truncate">{topic}</h3>
+                        <p className="text-sm text-slate-400">
+                          Educational video generated with AI narration
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 flex-shrink-0 ml-4">
+                        <button
+                          onClick={() => { setActiveTab('chat'); setPanelCollapsed(false); }}
+                          className="flex items-center gap-2 px-4 py-2 bg-blue-500/10 text-blue-400 rounded-lg hover:bg-blue-500/20 transition-all"
+                        >
+                          <Sparkles size={18} />
+                          <span className="text-sm font-medium">Ask AI</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Error State */}
             {error && (
               <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="mt-8 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 flex items-center gap-3"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-4 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 flex items-center gap-3 flex-shrink-0"
               >
-                <AlertCircle size={20} />
-                {error}
+                <AlertCircle size={20} className="flex-shrink-0" />
+                <span>{error}</span>
               </motion.div>
             )}
-          </motion.div>
-        </main>
+          </div>
 
-        {/* Chat Panel */}
-        {videoResult && (
-          <ChatPanel 
-            storyId={videoResult.story_id}
-            isOpen={chatOpen}
-            onToggle={() => setChatOpen(!chatOpen)}
-          />
-        )}
+          {/* Right: Control Panel */}
+          {videoResult && (
+            <motion.aside
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: panelCollapsed ? 48 : 400, opacity: 1 }}
+              transition={{ duration: 0.2 }}
+              className="border-l border-slate-800 bg-slate-900/30 flex flex-col overflow-hidden flex-shrink-0 relative"
+            >
+              {/* Collapse Toggle */}
+              <button
+                onClick={() => setPanelCollapsed(!panelCollapsed)}
+                className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-full z-10 w-6 h-12 bg-slate-800 border border-slate-700 rounded-l-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 transition-all"
+              >
+                <svg 
+                  className={`w-4 h-4 transition-transform ${panelCollapsed ? 'rotate-180' : ''}`} 
+                  fill="none" 
+                  viewBox="0 0 24 24" 
+                  stroke="currentColor"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
 
-        {/* Footer */}
-        <footer className="p-6 text-center text-white/10 font-mono text-xs tracking-widest uppercase">
-          Rawi Multimodal Engine v1.2
-        </footer>
-      </div>
+              {!panelCollapsed && (
+                <>
+                  {/* Tab Header */}
+                  <div className="flex border-b border-slate-800 flex-shrink-0">
+                    <button
+                      onClick={() => setActiveTab('transcript')}
+                      className={`flex-1 px-4 py-3 text-sm font-medium transition-all flex items-center justify-center gap-2 ${
+                        activeTab === 'transcript' 
+                          ? 'text-white border-b-2 border-blue-500 bg-slate-800/50' 
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <FileText size={16} />
+                      Transcript
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('chat')}
+                      className={`flex-1 px-4 py-3 text-sm font-medium transition-all flex items-center justify-center gap-2 ${
+                        activeTab === 'chat' 
+                          ? 'text-white border-b-2 border-blue-500 bg-slate-800/50' 
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <MessageCircle size={16} />
+                      AI Assistant
+                    </button>
+                  </div>
+
+                  {/* Tab Content */}
+                  <div className="flex-1 overflow-hidden min-h-0">
+                    {activeTab === 'transcript' ? (
+                      <TranscriptPanel 
+                        segments={segments}
+                        currentTime={currentTime}
+                        onSegmentClick={handleSegmentClick}
+                      />
+                    ) : (
+                      <ChatPanel 
+                        storyId={videoResult.story_id}
+                        apiBase={API_BASE}
+                      />
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* Collapsed State */}
+              {panelCollapsed && (
+                <div className="flex flex-col items-center py-4 gap-4">
+                  <button
+                    onClick={() => { setActiveTab('transcript'); setPanelCollapsed(false); }}
+                    className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
+                      activeTab === 'transcript' 
+                        ? 'bg-blue-500/20 text-blue-400' 
+                        : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+                    }`}
+                    title="Transcript"
+                  >
+                    <FileText size={20} />
+                  </button>
+                  <button
+                    onClick={() => { setActiveTab('chat'); setPanelCollapsed(false); }}
+                    className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
+                      activeTab === 'chat' 
+                        ? 'bg-blue-500/20 text-blue-400' 
+                        : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+                    }`}
+                    title="AI Assistant"
+                  >
+                    <MessageCircle size={20} />
+                  </button>
+                </div>
+              )}
+            </motion.aside>
+          )}
+        </div>
+      </main>
     </div>
   );
 };
