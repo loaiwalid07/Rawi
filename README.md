@@ -1,368 +1,324 @@
-# RAWI - The Storyteller
+# RAWI — AI Educational Video Generator
 
-## Project Vision
-
-RAWI (Rawi = "Storyteller" in Arabic) transforms dry curriculum into immersive, multimodal educational stories using Google's AI ecosystem. Built for the Gemini Live Agent Challenge, RAWI moves beyond simple text-in/text-out AI by creating interleaved output streams that combine narration, images, voiceover, and video into a unified storytelling experience.
-
-## The Rawi Story
-
-Rawi is an ancient, wise storyteller who has traveled through time, collecting tales from every corner of human history. When a student asks about a complex topic, Rawi doesn't just explain it—he weaves it into a living story, complete with vivid imagery and emotive voices that bring the subject to life.
-
-Rawi draws upon centuries of wisdom to transform abstract concepts into relatable narratives. Whether explaining the French Revolution through a bustling bakery, or describing the solar system as a cosmic playground, Rawi's stories engage young minds and make learning an adventure.
-
-## Tech Stack
-
-- **Orchestration**: Google Agent Development Kit (ADK) for Python
-- **Brain**: Gemini 3 Flash (via Vertex AI)
-- **Voices**: Gemini 2.5 Flash-TTS for emotive, character-driven narration
-- **Visuals**: Imagen (storyboard illustrations) and Veo (video sequences)
-- **Deployment**: Google Cloud Run with Shell Scripts
-- **Storage**: Google Cloud Storage for media assets
-
-## Features
-
-- ✨ **Immersive Storytelling**: Transform educational topics into engaging narratives
-- 🎬 **Multimodal Output**: Interleaved streams of text, images, voiceover, and video
-- 🎨 **Visual Storytelling**: Storyboard-driven video generation with Imagen and Veo
-- 🎤 **Emotive Voiceover**: Character-driven narration with Gemini TTS
-- 🚀 **Cloud-Native**: Deployed on Google Cloud Run with automated scripts
-- 🎯 **Age-Appropriate**: Tailored content for different age groups
-
-## Quick Start (5 minutes)
-
-### Prerequisites
-
-- Python 3.10+
-- Google Cloud project with Vertex AI enabled
-- Google Cloud SDK (gcloud CLI)
-- Docker (for deployment)
-- API credentials (Vertex AI, Cloud Storage)
-
-### Installation
-
-```bash
-# Clone and setup
-git clone <repo>
-cd rawi
-cp .env.example .env
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure Google Cloud
-gcloud auth login
-gcloud config set project YOUR_PROJECT_ID
-```
-
-### Environment Variables
-
-Edit `.env` file:
-
-```bash
-GOOGLE_CLOUD_PROJECT=your-project-id
-GOOGLE_CLOUD_LOCATION=us-central1
-GOOGLE_APPLICATION_CREDENTIALS=path/to/credentials.json
-
-# Optional: Customize
-STORAGE_BUCKET_NAME=your-project-story-assets
-MAX_VIDEO_DURATION_MINUTES=5
-DEFAULT_LANGUAGE=en
-```
-
-### Local Development
-
-```bash
-# Set environment variables
-export GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID
-export GOOGLE_APPLICATION_CREDENTIALS=path/to/credentials.json
-
-# Run the agent
-python main.py
-```
-
-### Deploy to Google Cloud
-
-```bash
-# One-command setup and deployment
-./infra/setup.sh
-./infra/deploy.sh
-```
-
-## Usage Examples
-
-### Example 1: French Revolution
-
-```python
-from main import rawi_agent, StoryRequest
-
-result = await rawi_agent.tell_story(
-    StoryRequest(
-        topic="French Revolution",
-        audience="10-year-old",
-        metaphor="a bakery",
-        duration_minutes=5
-    )
-)
-
-print(f"Video URL: {result.video_url}")
-print(f"Narration: {result.narration_text}")
-```
-
-### Example 2: Solar System
-
-```bash
-curl -X POST https://your-app-url/tell-story \
-  -H "Content-Type: application/json" \
-  -d '{
-    "topic": "Solar System",
-    "audience": "8-year-old",
-    "metaphor": "a playground",
-    "duration_minutes": 3
-  }'
-```
-
-### Example 3: Water Cycle
-
-```javascript
-// frontend example
-const response = await fetch('/tell-story', {
-  method: 'POST',
-  headers: {'Content-Type': 'application/json'},
-  body: JSON.stringify({
-    topic: 'Water Cycle',
-    audience: '12-year-old',
-    metaphor: 'a magical journey'
-  })
-});
-
-const story = await response.json;
-player.loadStory(story);
-```
-
-## Architecture
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed architecture diagrams using Mermaid.js.
-
-## Project Structure
-
-```
-rawi/
-├── README.md                      # Project documentation
-├── ARCHITECTURE.md                # Architecture diagram
-├── main.py                        # Entry point with FastAPI app
-├── requirements.txt               # Python dependencies
-├── .env.example                   # Environment variables template
-├── Dockerfile                     # Docker configuration
-│
-├── app/
-│   ├── __init__.py
-│   ├── director_agent.py          # ADK main orchestrator
-│   ├── story_generator.py         # Gemini 3 Flash story logic
-│   ├── media_engine.py            # Imagen/Veo + TTS integration
-│   ├── storyboard_agent.py        # Storyboard prompt generation
-│   └── video_merger.py            # FFmpeg video merging
-│
-├── infra/
-│   ├── setup.sh                   # Google Cloud project setup
-│   ├── deploy.sh                  # Deploy to Cloud Run
-│   └── teardown.sh                # Clean up resources
-│
-├── frontend/
-│   ├── index.html                 # Main UI
-│   ├── styles.css                 # Styling
-│   ├── app.js                     # Frontend logic
-│   └── components/
-│       ├── story-player.js        # Video + text bubble player
-│       └── progress-bar.js        # Story progress indicator
-│
-└── tests/
-    ├── test_story_generator.py
-    ├── test_media_engine.py
-    └── test_director_agent.py
-```
-
-## API Endpoints
-
-### POST /tell-story
-
-Generate a multimodal story for a given topic.
-
-**Request Body:**
-```json
-{
-  "topic": "French Revolution",
-  "audience": "10-year-old",
-  "metaphor": "a bakery",
-  "duration_minutes": 5,
-  "language": "en"
-}
-```
-
-**Response:**
-```json
-{
-  "video_url": "https://storage.googleapis.com/.../final_story.mp4",
-  "storyboard_urls": ["https://storage.googleapis.com/.../frame1.png"],
-  "narration_text": "Once upon a time...",
-  "voiceover_url": "https://storage.googleapis.com/.../voiceover.mp3",
-  "segments": [...]
-}
-```
-
-### GET /health
-
-Health check endpoint.
-
-**Response:**
-```json
-{
-  "status": "healthy",
-  "agent": "rawi_storyteller"
-}
-```
-
-## Interleaved Output Format
-
-RAWI produces an interleaved stream that combines multiple media types:
-
-```json
-{
-  "interleaved_stream": [
-    {
-      "type": "NARRATION",
-      "content": "Once upon a time...",
-      "timestamp": 0.0,
-      "duration": 3.0,
-      "metadata": {"emotion": "warm"}
-    },
-    {
-      "type": "IMAGE_URL",
-      "content": "https://storage.googleapis.com/.../frame1.png",
-      "timestamp": 0.0,
-      "duration": 3.0,
-      "metadata": {"style": "illustration"}
-    },
-    {
-      "type": "VOICEOVER_BLOB",
-      "content": "https://storage.googleapis.com/.../voiceover1.mp3",
-      "timestamp": 0.0,
-      "duration": 3.0,
-      "metadata": {"format": "mp3"}
-    }
-  ]
-}
-```
-
-## How It Works
-
-1. **Input**: User provides a topic, target audience, and optional metaphor
-2. **Story Planning**: Director Agent breaks topic into 5-7 story segments
-3. **Narration Generation**: Story Generator creates engaging narration for each segment
-4. **Storyboard Creation**: Storyboard Agent generates visual descriptions
-5. **Media Generation**: 
-   - Imagen creates storyboard illustrations
-   - Veo generates video segments
-   - Gemini TTS creates emotive voiceovers
-6. **Video Merging**: VideoMerger combines segments with smooth transitions
-7. **Output**: Interleaved stream of text, images, audio, and video
-
-## Development
-
-### Running Tests
-
-```bash
-pytest tests/
-```
-
-### Code Style
-
-```bash
-# Format code
-black app/
-
-# Lint
-flake8 app/
-
-# Type check
-mypy app/
-```
-
-### Adding New Features
-
-1. Create a new agent in `app/`
-2. Add tools to `RawiAgent` in `main.py`
-3. Update API endpoints if needed
-4. Add tests in `tests/`
-5. Update documentation
-
-## Deployment
-
-### Google Cloud Run
-
-```bash
-# Setup project
-./infra/setup.sh <project-id> <region>
-
-# Deploy
-./infra/deploy.sh <project-id> <region>
-
-# Clean up
-./infra/teardown.sh <project-id>
-```
-
-### Manual Deployment
-
-```bash
-# Build and push Docker image
-gcloud builds submit --tag gcr.io/PROJECT_ID/rawi-storyteller
-
-# Deploy to Cloud Run
-gcloud run deploy rawi-storyteller \
-  --image gcr.io/PROJECT_ID/rawi-storyteller \
-  --platform managed \
-  --region us-central1 \
-  --allow-unauthenticated
-```
-
-## Troubleshooting
-
-### Common Issues
-
-**Vertex AI API Error**
-- Ensure Vertex AI API is enabled: `gcloud services enable aiplatform.googleapis.com`
-- Check credentials are correct in `.env`
-
-**Video Generation Timeout**
-- Increase timeout in `main.py`: `uvicorn.run(..., timeout=600)`
-- Reduce segment count in `story_generator.py`
-
-**Storage Permission Denied**
-- Verify service account has `roles/storage.objectAdmin`
-- Check bucket exists: `gsutil ls gs://PROJECT_ID-story-assets`
-
-## Contributing
-
-We welcome contributions! Please follow these guidelines:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes with tests
-4. Submit a pull request
-
-## License
-
-MIT License - see LICENSE file for details
-
-## Acknowledgments
-
-- Google Agent Development Kit (ADK)
-- Gemini 3 Flash, Imagen, Veo, and Gemini TTS
-- Google Cloud Platform
-
-## Contact
-
-For questions or feedback, please open an issue on GitHub.
+> **RAWI** (Arabic for "Storyteller") transforms any topic into a professional educational explainer video using Google's AI ecosystem — Gemini, Imagen, Veo, and Cloud TTS — all orchestrated through a multi-agent pipeline.
 
 ---
 
-**RAWI - Where Every Lesson Becomes an Adventure** 📖✨
+## 🏗️ Architecture Diagram
+
+```mermaid
+flowchart TB
+    subgraph Frontend["Frontend (React + Vite)"]
+        UI["User Input\n(Topic)"]
+        VP["Video Player"]
+        TP["Transcript Panel"]
+        CP["AI Chat Panel"]
+    end
+
+    subgraph Backend["Backend (FastAPI on Cloud Run)"]
+        API["FastAPI Server\n(main.py)"]
+        TS["Task Store\n(SSE Progress)"]
+
+        subgraph Agents["Multi-Agent Pipeline"]
+            DA["Director Agent\n(Orchestrator)"]
+            SG["Story Generator\n(Gemini 2.5 Flash)"]
+            SB["Storyboard Agent\n(Gemini 2.5 Flash)"]
+        end
+
+        subgraph Media["Media Engine"]
+            IG["Image Generator\n(Imagen 3.0)"]
+            VG["Video Generator\n(Veo 2)"]
+            TTS["Voice Generator\n(Gemini TTS)"]
+        end
+
+        VM["Video Merger\n(FFmpeg)"]
+    end
+
+    subgraph GCP["Google Cloud Platform"]
+        VAI["Vertex AI APIs"]
+        GCS["Cloud Storage\n(Media Assets)"]
+        CR["Cloud Run\n(Deployment)"]
+    end
+
+    UI -->|"POST /tell-story"| API
+    API --> TS
+    TS -->|"SSE stream"| UI
+    API --> DA
+    DA --> SG
+    DA --> SB
+    SG -->|"Educational Script\n+ Key Points"| DA
+    SB -->|"Visual Prompts\n(Diagrams/Infographics)"| DA
+    DA --> IG
+    DA --> VG
+    DA --> TTS
+    IG --> GCS
+    VG --> GCS
+    TTS --> GCS
+    GCS --> VM
+    VM -->|"Final .mp4"| GCS
+    GCS -->|"Video URL"| VP
+    API -->|"Narration text"| TP
+    API -->|"Chat endpoint"| CP
+
+    IG -.->|"API"| VAI
+    VG -.->|"API"| VAI
+    TTS -.->|"API"| VAI
+    SG -.->|"API"| VAI
+    SB -.->|"API"| VAI
+    Backend -.->|"Deployed on"| CR
+
+    style Frontend fill:#1e293b,stroke:#3b82f6,color:#f1f5f9
+    style Backend fill:#1e293b,stroke:#8b5cf6,color:#f1f5f9
+    style GCP fill:#1e293b,stroke:#22c55e,color:#f1f5f9
+    style Agents fill:#1e1e2e,stroke:#a78bfa,color:#f1f5f9
+    style Media fill:#1e1e2e,stroke:#60a5fa,color:#f1f5f9
+```
+
+---
+
+## ⚡ Quick Start (Run Locally in 5 Minutes)
+
+### Prerequisites
+
+| Tool | Version | Check |
+|------|---------|-------|
+| Python | 3.10+ | `python --version` |
+| Node.js | 18+ | `node --version` |
+| FFmpeg | any | `ffmpeg -version` |
+| Google Cloud SDK | any | `gcloud --version` |
+| Git | any | `git --version` |
+
+### Step 1: Clone the repo
+
+```bash
+git clone https://github.com/loaiwalid07/Rawi.git
+cd Rawi
+```
+
+### Step 2: Set up Google Cloud credentials
+
+```bash
+# Login and set your project
+gcloud auth login
+gcloud auth application-default login
+gcloud config set project YOUR_PROJECT_ID
+
+# Enable required APIs
+gcloud services enable aiplatform.googleapis.com
+gcloud services enable storage.googleapis.com
+gcloud services enable texttospeech.googleapis.com
+```
+
+### Step 3: Create a `.env` file
+
+```bash
+# Copy and edit the environment file
+cp .env.example .env
+```
+
+Edit `.env` with your values:
+
+```env
+# Required
+GOOGLE_CLOUD_PROJECT=your-gcp-project-id
+GEMINI_API_KEY=your-gemini-api-key
+
+# Storage (a GCS bucket for media assets)
+STORAGE_BUCKET_NAME=your-project-story-assets
+
+# Optional
+LOCAL_OUTPUT_DIR=./output
+PORT=8000
+```
+
+### Step 4: Install Python dependencies
+
+```bash
+# Create virtual environment
+python -m venv .venv
+
+# Activate it
+# Windows:
+.venv\Scripts\activate
+# macOS/Linux:
+source .venv/bin/activate
+
+# Install packages
+pip install -r requirements.txt
+```
+
+### Step 5: Install frontend dependencies
+
+```bash
+cd frontend-react
+npm install
+cd ..
+```
+
+### Step 6: Run the app
+
+Open **two terminals**:
+
+**Terminal 1 — Backend:**
+```bash
+python main.py
+```
+The backend starts at `http://localhost:8000`
+
+**Terminal 2 — Frontend:**
+```bash
+cd frontend-react
+npm run dev
+```
+The frontend starts at `http://localhost:5173`
+
+### Step 7: Generate a video
+
+1. Open `http://localhost:5173` in your browser
+2. Type a topic (e.g., "How photosynthesis works")
+3. Watch the progress bar as RAWI generates your educational video
+4. View the final video with narration transcript in the sidebar
+
+---
+
+## 🎯 How It Works
+
+```
+User enters topic → Director Agent plans educational script
+    → Story Generator creates narration + key points (Gemini 2.5 Flash)
+    → Storyboard Agent generates visual descriptions for diagrams/infographics
+    → Media Engine generates assets in parallel:
+        • Imagen 3.0 → educational infographic images
+        • Veo 2 → motion graphics video segments
+        • Gemini TTS → voiceover narration audio
+    → Video Merger (FFmpeg) combines everything:
+        • Video segments with crossfade transitions
+        • Voiceover audio mixed in
+        • Subtitle overlays with key points
+    → Final .mp4 delivered to the user
+```
+
+---
+
+## 🛠️ Tech Stack
+
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| **Orchestration** | Google ADK (Agent Development Kit) | Multi-agent coordination |
+| **Script Generation** | Gemini 2.5 Flash | Educational narration & key points |
+| **Storyboarding** | Gemini 2.5 Flash | Visual prompt engineering |
+| **Images** | Imagen 3.0 Fast | Infographics, diagrams, charts |
+| **Video** | Veo 2 | Motion graphics & animated visuals |
+| **Voiceover** | Gemini TTS | Natural voice narration |
+| **Video Processing** | FFmpeg | Merging, transitions, subtitles |
+| **Backend** | FastAPI + Uvicorn | REST API + SSE streaming |
+| **Frontend** | React + Vite + Tailwind | Modern responsive UI |
+| **Storage** | Google Cloud Storage | Media asset hosting |
+| **Deployment** | Google Cloud Run | Serverless container hosting |
+
+---
+
+## 📁 Project Structure
+
+```
+Rawi/
+├── main.py                         # FastAPI app + RawiAgent orchestrator
+├── requirements.txt                # Python dependencies
+├── Dockerfile                      # Container config for Cloud Run
+├── .env.example                    # Environment template
+│
+├── app/
+│   ├── director_agent.py           # Orchestrates story planning
+│   ├── story_generator.py          # Gemini → educational scripts
+│   ├── storyboard_agent.py         # Gemini → visual descriptions
+│   ├── media_engine.py             # Imagen + Veo + TTS integration
+│   ├── video_merger.py             # FFmpeg merging + subtitles
+│   └── chat_service.py             # AI chat about generated video
+│
+├── frontend-react/
+│   ├── src/
+│   │   ├── App.tsx                 # Main UI with video + sidebar
+│   │   └── components/
+│   │       ├── VideoPlayer.tsx     # Video playback
+│   │       ├── TranscriptPanel.tsx # Narration transcript
+│   │       └── ChatPanel.tsx       # AI assistant chat
+│   └── package.json
+│
+├── infra/
+│   ├── setup.sh                    # GCP project setup
+│   └── deploy.sh                   # Deploy to Cloud Run
+│
+└── tests/
+    ├── conftest.py
+    └── unit/
+```
+
+---
+
+## 🚀 Deploy to Google Cloud Run
+
+```bash
+# One-command deployment
+./infra/setup.sh YOUR_PROJECT_ID us-central1
+./infra/deploy.sh YOUR_PROJECT_ID us-central1
+
+# Or manually:
+gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/rawi
+gcloud run deploy rawi \
+  --image gcr.io/YOUR_PROJECT_ID/rawi \
+  --platform managed \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --memory 2Gi \
+  --timeout 600
+```
+
+---
+
+## 📡 API Reference
+
+### `POST /tell-story`
+
+Start generating an educational video. Returns a `task_id` for progress tracking.
+
+```bash
+curl -X POST http://localhost:8000/tell-story \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "How photosynthesis works", "audience": "general", "duration_minutes": 2}'
+```
+
+**Response:** `{"task_id": "uuid-here"}`
+
+### `GET /stream-progress/{task_id}`
+
+SSE stream of real-time progress updates.
+
+```
+planning (10%) → storyboarding (15-35%) → generating (40-80%) → merging (85%) → completed (100%)
+```
+
+### `GET /health`
+
+Health check. Returns `{"status": "healthy"}`.
+
+---
+
+## 🔧 Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| `Vertex AI API Error` | Run `gcloud services enable aiplatform.googleapis.com` |
+| `Permission denied on GCS` | Ensure service account has `roles/storage.objectAdmin` |
+| `FFmpeg not found` | Install FFmpeg and ensure it's on your PATH |
+| `Video generation timeout` | Reduce `duration_minutes` or check API quotas |
+| `Frontend can't connect` | Verify backend is running on port 8000 |
+
+---
+
+## 📄 License
+
+MIT License — see [LICENSE](LICENSE) for details.
+
+---
+
+**RAWI — Where Every Topic Becomes a Visual Story** 🎬✨
