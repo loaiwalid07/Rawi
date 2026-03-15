@@ -17,10 +17,13 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# Build Docker image
+# Load GEMINI_API_KEY from .env if set
+GEMINI_KEY=$(grep GEMINI_API_KEY .env | cut -d '=' -f2)
+
+# Build Docker image (multi-stage: frontend + backend)
 IMAGE_NAME="${REGION}-docker.pkg.dev/${PROJECT_ID}/rawi-repo/${SERVICE_NAME}:latest"
 
-echo "🐳 Building Docker image..."
+echo "🐳 Building Docker image (frontend + backend)..."
 docker build -t $IMAGE_NAME .
 
 # Authenticate with Artifact Registry
@@ -30,6 +33,16 @@ gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
 # Push to Artifact Registry
 echo "⬆️  Pushing to Artifact Registry..."
 docker push $IMAGE_NAME
+
+# Build env vars string
+ENV_VARS="GOOGLE_CLOUD_PROJECT=$PROJECT_ID"
+ENV_VARS="$ENV_VARS,GOOGLE_CLOUD_LOCATION=$REGION"
+ENV_VARS="$ENV_VARS,STORAGE_BUCKET_NAME=${PROJECT_ID}-story-assets"
+ENV_VARS="$ENV_VARS,LOG_LEVEL=INFO"
+
+if [ -n "$GEMINI_KEY" ]; then
+    ENV_VARS="$ENV_VARS,GEMINI_API_KEY=$GEMINI_KEY"
+fi
 
 # Deploy to Cloud Run
 echo "☁️  Deploying to Cloud Run..."
@@ -43,10 +56,7 @@ gcloud run deploy $SERVICE_NAME \
     --timeout=3600 \
     --min-instances=0 \
     --max-instances=10 \
-    --set-env-vars=GOOGLE_CLOUD_PROJECT=$PROJECT_ID \
-    --set-env-vars=GOOGLE_CLOUD_LOCATION=$REGION \
-    --set-env-vars=STORAGE_BUCKET_NAME=${PROJECT_ID}-story-assets \
-    --set-env-vars=LOG_LEVEL=INFO
+    --set-env-vars="$ENV_VARS"
 
 # Get service URL
 SERVICE_URL=$(gcloud run services describe $SERVICE_NAME \
@@ -55,15 +65,15 @@ SERVICE_URL=$(gcloud run services describe $SERVICE_NAME \
 
 echo ""
 echo "✅ Deployment complete!"
-echo "🌐 Service URL: $SERVICE_URL"
-echo "📚 API Docs: $SERVICE_URL/docs"
-echo "🏥 Health Check: $SERVICE_URL/health"
+echo "🌐 App URL: $SERVICE_URL"
+echo "📡 API: $SERVICE_URL/tell-story"
+echo "🏥 Health: $SERVICE_URL/health"
 echo ""
 echo "🧪 Test the service:"
 echo "  curl $SERVICE_URL/health"
 echo ""
-echo "📖 Example request:"
+echo "📖 Generate a video:"
 echo "  curl -X POST $SERVICE_URL/tell-story \\"
 echo "    -H 'Content-Type: application/json' \\"
-echo "    -d '{\"topic\": \"French Revolution\", \"audience\": \"10-year-old\", \"metaphor\": \"a bakery\"}'"
+echo "    -d '{\"topic\": \"How photosynthesis works\", \"duration_minutes\": 2}'"
 echo ""

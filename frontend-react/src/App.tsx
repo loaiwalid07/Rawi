@@ -6,7 +6,8 @@ import VideoPlayer from './components/VideoPlayer';
 import TranscriptPanel from './components/TranscriptPanel';
 import ChatPanel from './components/ChatPanel';
 
-const API_BASE = 'http://localhost:8000';
+// In production (served from FastAPI), use same origin. In dev, proxy to backend.
+const API_BASE = window.location.port === '5173' ? 'http://localhost:8000' : '';
 
 type TaskStatus = 'pending' | 'planning' | 'storyboarding' | 'generating' | 'merging' | 'completed' | 'failed';
 

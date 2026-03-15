@@ -1,25 +1,39 @@
+## ---- Stage 1: Build React Frontend ----
+FROM node:20-slim AS frontend-build
+
+WORKDIR /frontend
+
+# Install dependencies first (cache layer)
+COPY frontend-react/package.json frontend-react/package-lock.json* ./
+RUN npm install
+
+# Copy frontend source and build
+COPY frontend-react/ ./
+RUN npm run build
+
+
+## ---- Stage 2: Python Backend ----
 FROM python:3.10-slim
 
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies (FFmpeg for video merging)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
-    ffprobe \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
+# Install Python dependencies (cache layer)
 COPY requirements.txt .
-
-# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy backend code
 COPY main.py .
 COPY app/ ./app/
 
-# Create necessary directories
+# Copy built frontend from Stage 1 into the expected directory
+COPY --from=frontend-build /frontend/dist ./frontend-react/dist
+
+# Create temp dir for media processing
 RUN mkdir -p /tmp/story-assets
 
 # Expose port
