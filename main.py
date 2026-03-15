@@ -144,37 +144,50 @@ class RawiAgent:
 
     async def tell_story(self, request: StoryRequest, task_id: Optional[str] = None) -> StoryOutput:
         try:
-            if task_id: task_store.update(task_id, TaskStatus.PLANNING, 10, "Drafting a magical story script...")
+            if task_id: task_store.update(task_id, TaskStatus.PLANNING, 10, "Researching topic and drafting educational script...")
 
+            # Assumes Veo produces ~5s limits. 2 minutes = 120s / 5s = 24 segments.
+            target_segments = int(request.duration_minutes * 60 / 5)
             story_plan = await self.director.plan_story(
-                topic=request.topic, audience=request.audience, metaphor=request.metaphor
+                topic=request.topic, audience=request.audience, metaphor=request.metaphor, num_segments=target_segments
             )
             
             # Extract visual bible for consistency
             visual_bible = story_plan.get("visual_bible", {})
             
-            # Storyboarding with granular progress
+            # Parallel Storyboarding with granular progress
             total_segs = len(story_plan["segments"])
-            storyboard_frames = []
             
-            for i, segment in enumerate(story_plan["segments"], start=1):
-                if task_id:
-                    progress = 15 + int((i / total_segs) * 20)  # 15-35%
-                    task_store.update(
-                        task_id, TaskStatus.STORYBOARDING, progress,
-                        f"Sketching scene {i}/{total_segs}: {segment.get('narration', '')[:40]}..."
-                    )
-                
+            async def generate_storyboard_parallel(i, segment):
+                # Rely on visual_bible for consistency to allow parallel generation without previous_frame
                 storyboard = await self.storyboard_agent.generate_storyboard(
                     narration=segment.get("narration", ""),
                     segment_id=i,
                     total_segments=total_segs,
-                    previous_frame=storyboard_frames[-1] if storyboard_frames else None,
+                    previous_frame=None,
                     visual_bible=visual_bible
                 )
-                storyboard_frames.append(storyboard)
+                return (i, storyboard)
+
+            sb_tasks = [generate_storyboard_parallel(i, segment) for i, segment in enumerate(story_plan["segments"], start=1)]
             
-            if task_id: task_store.update(task_id, TaskStatus.GENERATING, 40, "Animating your story and bringing scenes to life...")
+            sb_results = []
+            completed_storyboards = 0
+            for task_coro in asyncio.as_completed(sb_tasks):
+                res = await task_coro
+                sb_results.append(res)
+                completed_storyboards += 1
+                if task_id:
+                    progress = 15 + int((completed_storyboards / total_segs) * 20)
+                    task_store.update(
+                        task_id, TaskStatus.STORYBOARDING, progress,
+                        f"Sketching scene {completed_storyboards}/{total_segs}..."
+                    )
+            
+            sb_results = sorted(sb_results, key=lambda x: x[0])
+            storyboard_frames = [res[1] for res in sb_results]
+            
+            if task_id: task_store.update(task_id, TaskStatus.GENERATING, 40, "Generating educational visuals and voiceover...")
 
             video_segments, all_storyboard_urls, all_voiceovers, interleaved_stream = [], [], [], []
             current_timestamp = 0.0
@@ -189,19 +202,34 @@ class RawiAgent:
             completed_segments = 0
             total_segments = num_segments
             
-            async def generate_segment_assets(i, segment, storyboard):
+            async def generate_segment_assets(i, segment, storyboard, prev_narration):
                 nonlocal completed_segments
                 segment["duration"] = target_segment_duration
                 
-                # Use visual bible and storyboard details for high-quality prompting
-                image_prompt = f"High-quality 3D children's animation: {storyboard.visual_prompt}. Pixar-style character design."
-                video_prompt = f"Cinematic animation: {storyboard.visual_prompt}. Camera: {', '.join(storyboard.camera_angles)}."
+                # Use visual_description from the segment for educational visuals
+                visual_desc = segment.get("visual_description", storyboard.visual_prompt)
+                key_points = segment.get("key_points", [])
+                
+                # Educational image prompt: diagrams, infographics, labeled figures
+                image_prompt = f"Professional educational infographic: {visual_desc}. Clean design with labels, annotations, and data visualization. Modern flat design style."
+                
+                # Build contextual video prompt with previous segment for continuity
+                context_hint = ""
+                if prev_narration:
+                    context_hint = f"Continuing from the previous segment about: {prev_narration[:100]}. "
+                video_prompt = f"{context_hint}Educational explainer motion graphics: {visual_desc}. Smooth animation of diagrams, data flowing, labels appearing. Professional documentary style. Camera: {', '.join(storyboard.camera_angles) if storyboard.camera_angles else 'slow zoom and pan'}."
+                
+                # Subtitle text: use only key_points (short, scannable). Full narration plays as voiceover.
+                if key_points:
+                    narration_for_overlay = " • ".join(key_points)
+                else:
+                    narration_for_overlay = segment['narration'][:80]
                 
                 media_urls = await self.media_engine.generate_story_media(
                     image_prompt=image_prompt,
                     voiceover_text=segment['narration'],
                     video_prompt=video_prompt,
-                    emotion=segment.get('emotion', 'warm'),
+                    emotion=segment.get('emotion', 'informative'),
                     language=request.language
                 )
                 
@@ -209,28 +237,38 @@ class RawiAgent:
                 completed_segments += 1
                 if task_id:
                     progress_val = 40 + int((completed_segments / total_segments) * 40)
-                    task_store.update(task_id, TaskStatus.GENERATING, progress_val, f"Successfully created {completed_segments} of {total_segments} animated scenes...")
+                    task_store.update(task_id, TaskStatus.GENERATING, progress_val, f"Creating educational segment {completed_segments} of {total_segments}...")
                 
-                return {"segment": segment, "media_urls": media_urls, "id": i}
+                return {"segment": segment, "media_urls": media_urls, "id": i, "narration_overlay": narration_for_overlay}
 
-            gen_tasks = [generate_segment_assets(i, seg, sb) for i, (seg, sb) in enumerate(zip(story_plan["segments"], storyboard_frames))]
+            # Build tasks with previous narration context for each segment
+            segments_list = story_plan["segments"]
+            gen_tasks = []
+            for idx, (seg, sb) in enumerate(zip(segments_list, storyboard_frames)):
+                prev_narration = segments_list[idx - 1].get("narration", "") if idx > 0 else ""
+                gen_tasks.append(generate_segment_assets(idx, seg, sb, prev_narration))
             generated_data = await asyncio.gather(*gen_tasks)
             generated_data.sort(key=lambda x: x["id"])
 
-            if task_id: task_store.update(task_id, TaskStatus.MERGING, 85, "Final polishing and cinematic assembly...")
+            if task_id: task_store.update(task_id, TaskStatus.MERGING, 85, "Assembling final video with voiceover and text overlays...")
 
             for data in generated_data:
                 seg, urls = data["segment"], data["media_urls"]
+                narration_text = data.get("narration_overlay", seg["narration"])
                 # Only include valid videos
                 if "/media/" in urls["video_url"] or "gs://" in urls["video_url"]:
-                    video_segments.append({"url": urls["video_url"], "segment_id": data["id"], "duration": seg["duration"]})
+                    video_segments.append({
+                        "url": urls["video_url"], 
+                        "segment_id": data["id"], 
+                        "duration": seg["duration"], 
+                        "narration": narration_text,
+                        "voiceover_url": urls["voiceover_url"]
+                    })
                 
                 all_storyboard_urls.append(urls["image_url"])
                 all_voiceovers.append(urls["voiceover_url"])
                 
                 interleaved_stream.append(InterleavedSegment(MediaType.NARRATION, seg['narration'], current_timestamp, seg["duration"], {}))
-                interleaved_stream.append(InterleavedSegment(MediaType.IMAGE_URL, urls["image_url"], current_timestamp, seg["duration"], {}))
-                interleaved_stream.append(InterleavedSegment(MediaType.VOICEOVER_BLOB, urls["voiceover_url"], current_timestamp, seg["duration"], {}))
                 current_timestamp += seg["duration"] + 0.5
 
             if len(video_segments) < (total_segments / 2):
@@ -272,7 +310,7 @@ class RawiAgent:
                     "narration_text": output.narration_text,
                     "interleaved_stream": [seg.__dict__ for seg in output.interleaved_stream]
                 }
-                task_store.update(task_id, TaskStatus.COMPLETED, 100, "Your story is ready for the premiere!", result=result)
+                task_store.update(task_id, TaskStatus.COMPLETED, 100, "Your educational video is ready!", result=result)
             return output
             
         except Exception as e:
@@ -303,12 +341,14 @@ async def tell_story_endpoint(request: Dict[str, Any]):
     
     async def run_gen():
         try:
+            # Give the SSE subscriber time to connect before emitting progress events
+            await asyncio.sleep(1.0)
             agent = get_agent()
             req = StoryRequest(
-                topic=request.get("topic", "A magical adventure"),
-                audience=request.get("audience", "10-year-old"),
+                topic=request.get("topic", "A professional educational video"),
+                audience=request.get("audience", "general"),
                 metaphor=request.get("metaphor"),
-                duration_minutes=int(request.get("duration_minutes", 5))
+                duration_minutes=int(request.get("duration_minutes", 2))
             )
             await agent.tell_story(req, task_id=task_id)
         except Exception as e: logger.error(f"Task {task_id} failed: {e}")

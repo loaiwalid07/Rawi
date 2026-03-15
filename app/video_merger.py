@@ -64,6 +64,13 @@ def _parse_gcs_url(url: str) -> Optional[Tuple[str, str]]:
             return bucket, blob_path
     return None
 
+def _format_srt_time(seconds: float) -> str:
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    msecs = int((seconds - int(seconds)) * 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{msecs:03d}"
+
 
 class VideoMerger:
     """Merges multiple video segments with smooth transitions using FFmpeg"""
@@ -118,7 +125,7 @@ class VideoMerger:
     
     async def merge_segments(
         self,
-        video_segments: List[Dict[str, str]],
+        video_segments: List[Dict[str, Any]],
         output_filename: str,
         transition_duration: float = 0.5,
         resolution: str = "1920x1080"
@@ -133,10 +140,10 @@ class VideoMerger:
         
         try:
             # Download all segments locally
-            local_files = await self._download_segments(video_segments)
+            downloaded_segments = await self._download_segments(video_segments)
             
             # If no valid videos downloaded, return the first video URL or mock
-            if not local_files:
+            if not downloaded_segments:
                 logger.warning("No valid video segments to merge, using first available video URL")
                 first_video_url = video_segments[0]["url"] if video_segments else None
                 if first_video_url:
@@ -145,6 +152,9 @@ class VideoMerger:
                         return _to_proxy_video_url(parsed[0], parsed[1])
                 return "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
             
+            local_files = [seg["path"] for seg in downloaded_segments]
+            local_audio_files = [seg["audio_path"] for seg in downloaded_segments if seg.get("audio_path")]
+
             # If ffmpeg isn't available, fail soft.
             if not self._has_ffmpeg():
                 logger.warning("FFmpeg/FFprobe not found. Returning first downloadable segment URL.")
@@ -155,9 +165,9 @@ class VideoMerger:
                 return "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
 
             # Calculate durations and offsets
-            segment_info = await self._analyze_segments(local_files)
+            segment_info = await self._analyze_segments(downloaded_segments)
             
-            # Merge videos with transitions
+            # Merge videos with transitions and subtitles
             merged_file = os.path.join(self.temp_dir, output_filename)
             await self._merge_with_ffmpeg(local_files, segment_info, merged_file, transition_duration, resolution)
             
@@ -165,7 +175,7 @@ class VideoMerger:
             gcs_url = await self._upload_to_gcs(merged_file, output_filename)
             
             # Cleanup temporary files
-            await self._cleanup_files(local_files + [merged_file])
+            await self._cleanup_files(local_files + local_audio_files + [merged_file, os.path.join(self.temp_dir, f"subs_{output_filename}.srt")])
             
             logger.info("Video merge completed", gcs_url=gcs_url)
             return gcs_url
@@ -180,10 +190,10 @@ class VideoMerger:
     
     async def _download_segments(
         self,
-        video_segments: List[Dict[str, str]]
-    ) -> List[str]:
+        video_segments: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Download video segments from GCS to local temp directory"""
-        local_files = []
+        downloaded = []
         
         for segment in video_segments:
             gcs_url = segment["url"]
@@ -193,23 +203,49 @@ class VideoMerger:
 
             bucket_name, blob_path = parsed
             local_path = os.path.join(self.temp_dir, f"{uuid.uuid4()}.mp4")
+            local_audio_path = None
+            
+            # Download audio if available
+            voiceover_url = segment.get("voiceover_url")
+            if voiceover_url:
+                v_parsed = _parse_gcs_url(voiceover_url)
+                if v_parsed:
+                    v_bucket, v_path = v_parsed
+                    local_audio_path = os.path.join(self.temp_dir, f"{uuid.uuid4()}.mp3")
+                    try:
+                        a_bucket = self.storage_client.bucket(v_bucket)
+                        a_blob = a_bucket.blob(v_path)
+                        await asyncio.to_thread(a_blob.download_to_filename, local_audio_path)
+                    except Exception as e:
+                        logger.error("Failed to download audio segment", error=str(e))
+                        local_audio_path = None
 
             try:
                 bucket = self.storage_client.bucket(bucket_name)
                 blob = bucket.blob(blob_path)
                 await asyncio.to_thread(blob.download_to_filename, local_path)
-                local_files.append(local_path)
+                downloaded.append({
+                    "path": local_path, 
+                    "audio_path": local_audio_path,
+                    "narration": segment.get("narration", "")
+                })
             except Exception as e:
-                logger.error("Failed to download segment", error=str(e))
+                logger.error("Failed to download video segment", error=str(e))
                 continue
         
-        return local_files
+        return downloaded
     
-    async def _analyze_segments(self, local_files: List[str]) -> List[Dict[str, Any]]:
+    async def _analyze_segments(self, downloaded_segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         segment_info = []
-        for i, file_path in enumerate(local_files):
-            duration = await self._get_video_duration(file_path)
-            segment_info.append({"index": i, "path": file_path, "duration": duration})
+        for i, seg in enumerate(downloaded_segments):
+            duration = await self._get_video_duration(seg["path"])
+            segment_info.append({
+                "index": i, 
+                "path": seg["path"], 
+                "audio_path": seg.get("audio_path"),
+                "duration": duration,
+                "narration": seg["narration"]
+            })
         return segment_info
     
     async def _get_video_duration(self, video_path: str) -> float:
@@ -221,50 +257,92 @@ class VideoMerger:
             return 15.0
     
     async def _merge_with_ffmpeg(self, local_files: List[str], segment_info: List[Dict[str, Any]], output_file: str, transition_duration: float, resolution: str):
-        if len(local_files) == 1:
-            await asyncio.to_thread(shutil.copy2, local_files[0], output_file)
-            return
+        # Even if len == 1, we must run it through the subtitles filter.
+        # So we do not do a simple copy.
 
-        # Build complex filter for transitions
-        # We'll use crossfade for a more cinematic feel
+        # Generate SRT
+        srt_filename = f"subs_{os.path.basename(output_file)}.srt"
+        srt_path = os.path.join(self.temp_dir, srt_filename)
+        with open(srt_path, "w", encoding="utf-8") as f:
+            curr_t = 0.0
+            for i, seg in enumerate(segment_info):
+                end_t = curr_t + seg["duration"]
+                if i < len(segment_info) - 1:
+                    end_t -= transition_duration
+                f.write(f"{i+1}\n")
+                f.write(f"{_format_srt_time(curr_t)} --> {_format_srt_time(end_t)}\n")
+                f.write(f"{seg.get('narration', '')}\n\n")
+                curr_t = end_t
+                
+        # Combine inputs: video files first, then audio files
         inputs = []
         for f in local_files:
             inputs.extend(["-i", f])
             
-        # Example for 2 segments:
-        # [0:v][1:v]xfade=transition=fade:duration=0.5:offset=14.5[v]
-        # For multiple, we chain them.
-        
-        filter_complex = ""
-        current_offset = 0.0
-        
-        for i in range(len(segment_info) - 1):
-            dur = segment_info[i]["duration"]
-            current_offset += dur - transition_duration
-            
-            if i == 0:
-                prev_node = "[0:v]"
-            else:
-                prev_node = "[v%d]" % i
+        audio_inputs = []
+        for seg in segment_info:
+            if seg.get("audio_path"):
+                audio_inputs.append(seg["audio_path"])
                 
-            next_node = "[%d:v]" % (i + 1)
-            out_node = "[v%d]" % (i + 1)
+        for f in audio_inputs:
+            inputs.extend(["-i", f])
             
-            filter_complex += f"{prev_node}{next_node}xfade=transition=fade:duration={transition_duration}:offset={current_offset}{out_node};"
+        filter_parts = []
+        current_offset: float = 0.0
+        
+        if len(segment_info) > 1:
+            for i in range(len(segment_info) - 1):
+                dur = float(segment_info[i]["duration"])
+                current_offset += dur - transition_duration
+                
+                prev_node = "[0:v]" if i == 0 else f"[v{i}]"
+                next_node = f"[{i + 1}:v]"
+                out_node = f"[v{i + 1}]"
+                
+                filter_parts.append(f"{prev_node}{next_node}xfade=transition=fade:duration={transition_duration}:offset={current_offset}{out_node};")
+            
+            merged_v_node = f"[v{len(segment_info) - 1}]"
+        else:
+            merged_v_node = "[0:v]"
 
-        # Handle Audio: simple amix or concat
-        audio_filter = ""
+        # Add subs filter using the generated SRT file.
+        # Professional educational subtitle style: larger font, semi-transparent background, bottom positioning
+        final_v_node = "[final_v]"
+        sub_style = "FontSize=28,FontName=Arial,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,BorderStyle=4,Outline=1,Shadow=0,MarginV=30,Bold=1"
+        filter_parts.append(f"{merged_v_node}subtitles={srt_filename}:force_style='{sub_style}'{final_v_node};")
+
+        # Handle Audio
+        audio_stream_idx: int = len(local_files)
+        audio_offset: float = 0.0
+        mix_nodes: str = ""
+        num_mix: int = 0
+        
         for i in range(len(segment_info)):
-            audio_filter += "[%d:a]" % i
-        audio_filter += f"concat=n={len(segment_info)}:v=0:a=1[a]"
-
-        final_v_node = "[v%d]" % (len(segment_info) - 1)
+            if segment_info[i].get("audio_path"):
+                delay_ms = int(audio_offset * 1000)  # type: ignore
+                filter_parts.append(f"[{audio_stream_idx}:a]adelay={delay_ms}:all=1[a{i}];")
+                mix_nodes += f"[a{i}]"  # type: ignore
+                audio_stream_idx += 1   # type: ignore
+                num_mix += 1            # type: ignore
+                
+            dur = float(segment_info[i]["duration"])
+            if i < len(segment_info) - 1:
+                audio_offset += dur - transition_duration  # type: ignore
+                
+        if num_mix > 0:
+            filter_parts.append(f"{mix_nodes}amix=inputs={num_mix}:duration=longest:dropout_transition=0,volume={num_mix}[a]")
+            audio_map = ["-map", "[a]"]
+        else:
+            audio_map = []
+            
+        final_filter = "".join(filter_parts)
         
         cmd = [
             self.ffmpeg_bin, "-y"
         ] + inputs + [
-            "-filter_complex", f"{filter_complex}{audio_filter}",
-            "-map", final_v_node, "-map", "[a]",
+            "-filter_complex", final_filter,
+            "-map", final_v_node
+        ] + audio_map + [
             "-c:v", "libx264", "-preset", "fast", "-crf", "23",
             "-c:a", "aac", "-b:a", "192k",
             "-s", resolution,
@@ -272,9 +350,10 @@ class VideoMerger:
         ]
         
         try:
-            logger.info("Running complex ffmpeg merge", cmd=" ".join(cmd))
+            logger.info("Running complex ffmpeg merge with audio", cmd=" ".join(cmd), cwd=self.temp_dir)
             process = await asyncio.create_subprocess_exec(
                 *cmd,
+                cwd=self.temp_dir,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
@@ -282,9 +361,40 @@ class VideoMerger:
             if process.returncode != 0:
                 raise RuntimeError(f"FFmpeg failed: {stderr.decode()}")
         except Exception as e:
-            logger.error("Complex merge failed, falling back to simple concat", error=str(e))
-            # Fallback to simple concat if complex filter fails (e.g. resolution mismatch)
-            await self._simple_concat(local_files, output_file, resolution)
+            logger.error("Complex merge with audio failed, retrying without audio", error=str(e))
+            # Fallback: retry without audio inputs
+            try:
+                video_only_inputs = []
+                for f_path in local_files:
+                    video_only_inputs.extend(["-i", f_path])
+                
+                # Rebuild filter without audio parts
+                video_filter_parts = [p for p in filter_parts if "adelay" not in p and "amix" not in p]
+                video_only_filter = "".join(video_filter_parts)
+                
+                fallback_cmd = [
+                    self.ffmpeg_bin, "-y"
+                ] + video_only_inputs + [
+                    "-filter_complex", video_only_filter,
+                    "-map", final_v_node,
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                    "-an",
+                    "-s", resolution,
+                    output_file
+                ]
+                logger.info("Running ffmpeg merge without audio", cmd=" ".join(fallback_cmd))
+                process2 = await asyncio.create_subprocess_exec(
+                    *fallback_cmd,
+                    cwd=self.temp_dir,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout2, stderr2 = await process2.communicate()
+                if process2.returncode != 0:
+                    raise RuntimeError(f"FFmpeg video-only fallback also failed: {stderr2.decode()}")
+            except Exception as e2:
+                logger.error("Video-only fallback also failed, using simple concat", error=str(e2))
+                await self._simple_concat(local_files, output_file, resolution)
 
     async def _simple_concat(self, local_files: List[str], output_file: str, resolution: str):
         concat_file = os.path.join(self.temp_dir, f"concat_{uuid.uuid4()}.txt")

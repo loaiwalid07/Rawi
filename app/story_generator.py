@@ -121,24 +121,31 @@ class StoryGenerator:
         num_segments: int
     ) -> Dict[str, Any]:
         """Return mock story plan for development when AI is not available"""
-        metaphor_text = f" using the metaphor of {metaphor}" if metaphor else ""
+        analogy_text = f" (using the analogy of {metaphor})" if metaphor else ""
         
         segments = []
         for i in range(1, num_segments + 1):
             segments.append({
                 "id": i,
-                "title": f"Part {i}: {topic}",
-                "narration": f"Once upon a time, there was a story about {topic}{metaphor_text}. This is segment {i} of the story, where we learn important lessons about {topic}.",
-                "visual_elements": ["illustration", "characters", "scene"],
-                "emotion": "warm",
+                "title": f"Part {i}: Understanding {topic}",
+                "narration": f"In this section, we explore a key aspect of {topic}{analogy_text}. This is segment {i}, where we break down important concepts and explain them clearly.",
+                "key_points": [f"Key fact about {topic} #{i}", f"Important detail #{i}"],
+                "visual_description": f"Infographic diagram illustrating concept {i} of {topic}",
+                "visual_elements": ["diagram", "labels", "data"],
+                "emotion": "informative",
                 "transition": "fade" if i < num_segments else "end",
                 "duration": 15.0
             })
         
         return {
-            "title": f"The Story of {topic}",
+            "title": f"Understanding {topic}",
+            "visual_bible": {
+                "style": "clean infographic and diagram-based visuals",
+                "color_palette": "professional blue and white",
+                "typography": "modern, sans-serif labels"
+            },
             "segments": segments,
-            "summary": f"An educational story about {topic}{metaphor_text} for {audience}-olds."
+            "summary": f"An educational explainer about {topic}{analogy_text} for {audience} audience."
         }
     
     async def generate_narration(
@@ -192,49 +199,58 @@ class StoryGenerator:
         metaphor: Optional[str],
         num_segments: int
     ) -> str:
-        """Create the prompt for story plan generation"""
+        """Create the prompt for educational story plan generation"""
         metaphor_section = ""
         if metaphor:
-            metaphor_section = f"Use the metaphor of {metaphor} to explain the concepts."
+            metaphor_section = f"Use the analogy of {metaphor} to make concepts more relatable."
         
         prompt = f"""
-        Create an engaging {num_segments}-segment story plan about {topic} for {audience}-olds.
+        Create a {num_segments}-segment **educational explainer video script** about "{topic}" for a {audience} audience.
         
         {metaphor_section}
         
-        # VISUAL CONSISTENCY (VERY IMPORTANT):
-        Define a "visual_bible" that ensures character and environment continuity. 
-        - Character Appearance: Specific details (hair color, clothing, unique features) that NEVER change.
-        - Environment: The primary setting's layout and color palette.
+        # CONTENT STYLE:
+        - This is a professional educational video, NOT a fairy tale or story.
+        - Narration should be clear, explanatory, and informative — like a documentary or educational YouTube video.
+        - Each segment should teach a specific concept, fact, or process related to the topic.
+        - Include concrete data, examples, and explanations — not vague storytelling.
+        
+        # VISUAL STYLE:
+        Define a "visual_bible" that ensures visual consistency across segments:
+        - Color Theme: A clean, professional palette suited to the topic
+        - Visual Style: Infographics, diagrams, charts, process flows, annotated figures
+        - Typography: Clean, modern fonts with clear labels
         
         # SEGMENTS:
         For each segment, provide:
-        1. A brief title
-        2. Engaging narration text (2-3 sentences)
-        3. Visual elements to show (what to illustrate)
-        4. Emotional tone for narration
-        5. How it transitions to next segment
+        1. A clear, descriptive title (e.g., "How Photosynthesis Converts Light to Energy")
+        2. Narration text (2-4 sentences of clear, educational explanation)
+        3. key_points: 2-3 short bullet points of the most important facts (these will appear as text overlays in the video)
+        4. visual_description: What educational visual to show (diagram, chart, process flow, labeled figure, comparison, timeline, etc.)
+        5. tone: The appropriate tone (informative, analytical, enthusiastic, etc.)
         
         # RESPONSE FORMAT:
         Structure the response as JSON:
         {{
-          "title": "Story Title",
+          "title": "Educational Video Title",
           "visual_bible": {{
-            "characters": [{{ "name": "Name", "description": "CONSISTENT visual details" }}],
-            "setting": "Description of the main setting",
-            "color_palette": "Specific color theme"
+            "style": "clean infographic and diagram-based visuals",
+            "color_palette": "specific professional color theme",
+            "typography": "modern, sans-serif labels and annotations"
           }},
           "segments": [
             {{
               "id": 1,
               "title": "Segment Title",
-              "narration": "Engaging narrative text...",
-              "visual_elements": ["element1", "element2"],
-              "emotion": "warm",
-              "transition": "fade to next scene"
+              "narration": "Clear educational explanation...",
+              "key_points": ["Key fact 1", "Key fact 2"],
+              "visual_description": "Labeled diagram showing...",
+              "visual_elements": ["diagram", "labels", "arrows"],
+              "emotion": "informative",
+              "transition": "fade to next topic"
             }}
           ],
-          "summary": "Brief summary"
+          "summary": "Brief summary of the educational content covered"
         }}
         """
         

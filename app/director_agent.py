@@ -75,19 +75,10 @@ class DirectorAgent:
         topic: str,
         audience: str,
         metaphor: Optional[str] = None,
-        num_segments: int = 12
+        num_segments: int = 24
     ) -> Dict[str, Any]:
         """
-        Plan a complete story by breaking it into segments.
-        
-        Args:
-            topic: Educational topic to explain
-            audience: Target audience
-            metaphor: Optional metaphor to use
-            num_segments: Number of story segments
-            
-        Returns:
-            Story plan with segments and metadata
+        Plan a complete story by breaking it into segments. Default to 24 segments for 2 minutes (5s/segment).
         """
         logger.info(
             "Planning story",
@@ -110,7 +101,7 @@ class DirectorAgent:
         self,
         topic: str,
         key_points: List[str],
-        tone: str = "engaging"
+        tone: str = "professional and explanatory"
     ) -> str:
         """Generate narration text using the story generator"""
         narration = await self.story_generator.generate_narration(

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, RotateCcw, AlertCircle, MessageCircle, FileText, Home, Video, Sparkles } from 'lucide-react';
+import { Send, RotateCcw, AlertCircle, MessageCircle, FileText, Sparkles } from 'lucide-react';
 import axios from 'axios';
 import VideoPlayer from './components/VideoPlayer';
 import TranscriptPanel from './components/TranscriptPanel';
@@ -104,7 +104,7 @@ const App: React.FC = () => {
     setActiveTab('transcript');
   };
 
-  const segments: Segment[] = videoResult?.interleaved_stream || [];
+  const segments: Segment[] = (videoResult?.interleaved_stream || []).filter((seg: Segment) => seg.type === 'NARRATION');
 
   const getStatusColor = (s: TaskStatus) => {
     switch (s) {
@@ -119,31 +119,12 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen bg-slate-950 text-slate-100 flex overflow-hidden">
-      {/* Sidebar */}
-      <aside className="w-16 bg-slate-900 border-r border-slate-800 flex flex-col items-center py-4 gap-2 flex-shrink-0">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center mb-4">
-          <Video size={20} className="text-white" />
-        </div>
-        
-        <button className="w-10 h-10 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-all flex items-center justify-center">
-          <Home size={20} />
-        </button>
-        
-        <button className="w-10 h-10 rounded-lg text-slate-500 hover:bg-slate-800 hover:text-slate-300 transition-all flex items-center justify-center">
-          <FileText size={20} />
-        </button>
-        
-        <div className="flex-1" />
-        
-        <div className="text-[10px] text-slate-600 font-mono">v1.3</div>
-      </aside>
-
       {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* Header */}
-        <header className="h-14 border-b border-slate-800 flex items-center justify-between px-6 bg-slate-900/50 flex-shrink-0">
+        <header className="h-14 border-b border-slate-800 flex items-center justify-between px-6 bg-slate-900/50 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <h1 className="text-lg font-semibold text-white flex-shrink-0">
+            <h1 className="text-lg font-semibold text-white shrink-0">
               RAWI <span className="text-blue-400 font-normal">Studio</span>
             </h1>
             {videoResult && (
@@ -156,10 +137,10 @@ const App: React.FC = () => {
           {videoResult && (
             <button
               onClick={resetApp}
-              className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors flex-shrink-0"
+              className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors shrink-0"
             >
               <RotateCcw size={16} />
-              <span>New Story</span>
+              <span>New Video</span>
             </button>
           )}
         </header>
@@ -180,7 +161,7 @@ const App: React.FC = () => {
                 >
                   <div className="text-center mb-8">
                     <h2 className="text-3xl font-bold text-white mb-2">
-                      Transform Any Topic Into a Story
+                      Transform Any Topic Into a Video
                     </h2>
                     <p className="text-slate-400">
                       Enter a topic and watch it become an engaging educational video
@@ -269,7 +250,7 @@ const App: React.FC = () => {
                   </div>
                   
                   {/* Video Info Bar */}
-                  <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 flex-shrink-0">
+                  <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 shrink-0">
                     <div className="flex items-center justify-between">
                       <div className="min-w-0 flex-1">
                         <h3 className="font-medium text-white mb-1 truncate">{topic}</h3>
@@ -277,7 +258,7 @@ const App: React.FC = () => {
                           Educational video generated with AI narration
                         </p>
                       </div>
-                      <div className="flex items-center gap-3 flex-shrink-0 ml-4">
+                      <div className="flex items-center gap-3 shrink-0 ml-4">
                         <button
                           onClick={() => { setActiveTab('chat'); setPanelCollapsed(false); }}
                           className="flex items-center gap-2 px-4 py-2 bg-blue-500/10 text-blue-400 rounded-lg hover:bg-blue-500/20 transition-all"
@@ -297,21 +278,21 @@ const App: React.FC = () => {
               <motion.div 
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mt-4 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 flex items-center gap-3 flex-shrink-0"
+                className="mt-4 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 flex items-center gap-3 shrink-0"
               >
-                <AlertCircle size={20} className="flex-shrink-0" />
+                <AlertCircle size={20} className="shrink-0" />
                 <span>{error}</span>
               </motion.div>
             )}
           </div>
 
-          {/* Right: Control Panel */}
+          {/* Right: Transcript & AI Assistant Panel */}
           {videoResult && (
             <motion.aside
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: panelCollapsed ? 48 : 400, opacity: 1 }}
               transition={{ duration: 0.2 }}
-              className="border-l border-slate-800 bg-slate-900/30 flex flex-col overflow-hidden flex-shrink-0 relative"
+              className="border-l border-slate-800 bg-slate-900/30 flex flex-col overflow-hidden shrink-0 relative"
             >
               {/* Collapse Toggle */}
               <button
@@ -331,7 +312,7 @@ const App: React.FC = () => {
               {!panelCollapsed && (
                 <>
                   {/* Tab Header */}
-                  <div className="flex border-b border-slate-800 flex-shrink-0">
+                  <div className="flex border-b border-slate-800 shrink-0">
                     <button
                       onClick={() => setActiveTab('transcript')}
                       className={`flex-1 px-4 py-3 text-sm font-medium transition-all flex items-center justify-center gap-2 ${

@@ -135,44 +135,49 @@ class StoryboardAgent:
         previous_frame: Optional[StoryboardFrame],
         visual_bible: Optional[Dict[str, Any]] = None
     ) -> str:
-        """Create prompt for storyboard generation"""
+        """Create prompt for educational storyboard generation"""
         
         bible_section = ""
         if visual_bible:
-            chars = json.dumps(visual_bible.get("characters", []), indent=2)
             bible_section = f"""
-            # VISUAL BIBLE (CONSISTENCY RULES):
-            - Characters: {chars}
-            - Setting: {visual_bible.get('setting', 'Animation world')}
-            - Palette: {visual_bible.get('color_palette', 'Vibrant')}
+            # VISUAL STYLE GUIDE:
+            - Style: {visual_bible.get('style', 'Clean infographic and diagram-based visuals')}
+            - Palette: {visual_bible.get('color_palette', 'Professional blue and white')}
+            - Typography: {visual_bible.get('typography', 'Modern, sans-serif labels')}
             
-            STRICTLY follow these descriptions for all characters.
+            STRICTLY follow this visual style for consistency.
             """
 
         continuity_section = ""
         if previous_frame:
             continuity_section = f"""
             Previous scene context:
-            - Characters: {', '.join(previous_frame.characters)}
-            - Color palette: {previous_frame.color_palette}
+            - Visual style: {previous_frame.color_palette}
             
             Ensure visual continuity with the previous scene.
             """
         
         prompt = f"""
-        # TASK: HIGH-QUALITY CINEMATIC ANIMATION STORYBOARD
-        Create a detailed visual storyboard for this story segment to guide a high-end 3D animation model (Veo).
+        # TASK: EDUCATIONAL EXPLAINER VIDEO STORYBOARD
+        Create a detailed visual storyboard for this educational video segment to guide an AI video/image generation model.
         
         {bible_section}
         
-        # STORY SEGMENT (Scene {segment_id}/{total_segments}):
+        # SEGMENT ({segment_id}/{total_segments}):
         Narration: {narration}
         
         # INSTRUCTIONS:
-        - Describe scenes for a high-end 3D animated film (Pixar/Disney style)
-        - Focus on expressive characters and vibrant environments
-        - Specify cinematic lighting (golden hour, magical glows, soft shadows)
-        - Define dynamic camera movements (slow zoom, pan, low-angle)
+        - This is an EDUCATIONAL video, NOT a cartoon or animated story.
+        - Describe visuals appropriate for an explainer or documentary:
+          * Infographic diagrams with labels and annotations
+          * Data visualizations (charts, graphs, comparisons)
+          * Process flow diagrams with arrows and steps
+          * Annotated figures and cross-sections
+          * Clean illustrations with text labels explaining key concepts
+          * Motion graphics showing data transforming or processes in action
+        - Use clean, professional color schemes (blues, whites, greens, grays)
+        - Camera movements should be smooth: slow pans across diagrams, zoom on key data points
+        - NO cartoon characters, NO fairy-tale scenes, NO Pixar/Disney style
         - Format your response as structured text for parsing.
         """
         
